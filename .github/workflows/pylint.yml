@@ -1,0 +1,130 @@
+name: Pylint
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  lint:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+      fail-fast: false  # Continue other jobs if one fails
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - name: Cache pip dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/pip
+          ~\AppData\Local\pip\Cache
+        key: ${{ runner.os }}-pip-pylint-${{ hashFiles('**/requirements*.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-pylint-
+          ${{ runner.os }}-pip-
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pylint
+
+    - name: Run Pylint (Ubuntu)
+      if: runner.os == 'Linux'
+      run: |
+        pylint $(find . -name "*.py" -not -path "./.git/*" -not -path "./venv/*" -not -path "./.venv/*" -not -path "./tmpclaude-*") \
+          --fail-under=7.0 \
+          --output-format=colorized
+
+    - name: Run Pylint (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $files = Get-ChildItem -Recurse -Filter "*.py" |
+          Where-Object { $_.FullName -notmatch '\.git|venv|\.venv|tmpclaude-' } |
+          Select-Object -ExpandProperty FullName
+        if ($files) {
+          pylint $files --fail-under=7.0 --output-format=colorized
+        } else {
+          Write-Host "No Python files found"
+          exit 0
+        }
+
+  # Separate job for PR annotations (Ubuntu only, avoids duplicate comments)
+  annotate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - name: Cache pip dependencies
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-pylint-${{ hashFiles('**/requirements*.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-pylint-
+          ${{ runner.os }}-pip-
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pylint
+
+    - name: Run Pylint with JSON output
+      id: pylint
+      continue-on-error: true
+      run: |
+        pylint $(find . -name "*.py" -not -path "./.git/*" -not -path "./venv/*" -not -path "./.venv/*" -not -path "./tmpclaude-*") \
+          --output-format=json:pylint-report.json,colorized \
+          --exit-zero
+
+    - name: Annotate PR with Pylint results
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+
+          if (!fs.existsSync('pylint-report.json')) {
+            console.log('No pylint report found');
+            return;
+          }
+
+          const report = JSON.parse(fs.readFileSync('pylint-report.json', 'utf8'));
+          const annotations = report
+            .filter(item => ['error', 'warning', 'convention', 'refactor'].includes(item.type))
+            .slice(0, 50)  // Limit to 50 annotations
+            .map(item => ({
+              path: item.path,
+              start_line: item.line,
+              end_line: item.line,
+              annotation_level: item.type === 'error' ? 'failure' : 'warning',
+              message: `[${item.symbol}] ${item.message}`
+            }));
+
+          if (annotations.length > 0) {
+            console.log(`Found ${annotations.length} issues to annotate`);
+            for (const ann of annotations) {
+              console.log(`::warning file=${ann.path},line=${ann.start_line}::${ann.message}`);
+            }
+          } else {
+            console.log('No issues found!');
+          }

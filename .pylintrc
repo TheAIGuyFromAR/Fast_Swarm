@@ -1,0 +1,59 @@
+[MAIN]
+# Use multiple processes for faster linting
+jobs=0
+
+# Minimum score to pass (also enforced in CI via --fail-under)
+fail-under=7.0
+
+# Ignore patterns (regex, not glob)
+ignore-patterns=
+    tmpclaude-.*,
+    __pycache__,
+    .*\.pyc
+
+[MESSAGES CONTROL]
+# Disable overly pedantic checks for this codebase
+disable=
+    # Style preferences (not errors)
+    missing-module-docstring,
+    missing-class-docstring,
+    missing-function-docstring,
+    line-too-long,
+    too-few-public-methods,
+    too-many-arguments,
+    too-many-locals,
+    too-many-branches,
+    too-many-statements,
+    too-many-instance-attributes,
+    # Common in trading/math code
+    invalid-name,
+    # Async patterns sometimes trigger false positives
+    not-async-context-manager,
+    # Import order is handled by other tools (isort/ruff)
+    wrong-import-order,
+    wrong-import-position,
+    # These are often false positives with SQLModel/Pydantic
+    no-member,
+    # Duplicate code detection is expensive and noisy
+    duplicate-code,
+
+[FORMAT]
+# Max line length (generous for readability)
+max-line-length=120
+
+[DESIGN]
+# Allow more complexity for trading algorithms
+max-args=10
+max-locals=20
+max-branches=15
+
+[BASIC]
+# Allow short variable names common in trading (e.g., df, ts, px)
+good-names=i,j,k,v,x,y,df,ts,px,id,db,ok,_
+
+[TYPECHECK]
+# Ignore dynamic attributes from SQLModel/Pydantic
+ignored-classes=
+    SQLModel,
+    BaseModel,
+    Field

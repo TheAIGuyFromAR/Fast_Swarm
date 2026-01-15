@@ -1,0 +1,4 @@
+# file: C:\Users\Admin\Documents\Fast_Swarm\Tests\Property\strategies.py
+# hypothesis_version: 6.148.11
+
+[-100.0, -50.0, -10.0, -0.01, 0.0, 0.001, 0.002, 0.01, 0.5, 0.99, 1.0, 1.01, 10.0, 100.0, 1000.0, 50000.0, 1000000.0, 100, 10000, 100000, 3600000, 1704067200000, '-inf', 'adaptability', 'agent_id', 'assigned_patterns', 'breakout_preference', 'close', 'drawdown_sensitivity', 'entry_aggression', 'exit_aggression', 'extreme', 'fitness_score', 'generation', 'high', 'hold_duration_bias', 'inf', 'lookback_preference', 'low', 'mean_reversion', 'nan', 'neg_inf', 'news_reactivity', 'open', 'patience', 'profit_target_greed', 'risk_tolerance', 'sentiment_contrarian', 'sentiment_weight', 'stop_loss_tightness', 'timestamp', 'traits', 'trend_following', 'volatility_seeking', 'volume', 'volume_sensitivity', 'win_rate_preference', 'zero']

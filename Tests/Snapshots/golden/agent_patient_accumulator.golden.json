@@ -1,0 +1,28 @@
+{
+  "agent_id": "canonical-patient_accumulator-888",
+  "trait_hash": "9a75b08b807f23393b33f2d5a9c24ff796844570af3ed8732be040a89f7dccf3",
+  "traits": {
+    "adaptability": 0.2416359027309003,
+    "breakout_preference": 0.608486197665937,
+    "correlation_awareness": 0.6376827346231597,
+    "drawdown_sensitivity": 0.3,
+    "entry_aggression": 0.2,
+    "exit_aggression": 0.6384683171617526,
+    "funding_rate_sensitivity": 0.5803793335631843,
+    "hold_duration_bias": 0.9,
+    "lookback_preference": 0.9649973916434333,
+    "mean_reversion": 0.22629276000967935,
+    "momentum_vs_reversion": 0.7039028062905546,
+    "news_reactivity": 0.3763448859737857,
+    "patience": 0.95,
+    "profit_target_greed": 0.8,
+    "risk_tolerance": 0.0798452305191113,
+    "sentiment_contrarian": 0.010736784798450305,
+    "sentiment_weight": 0.909616852353763,
+    "stop_loss_tightness": 0.8915450998766813,
+    "trend_following": 0.3134853337937691,
+    "volatility_seeking": 0.9158309064551332,
+    "volume_sensitivity": 0.871759692609485,
+    "win_rate_preference": 0.3747238557146838
+  }
+}

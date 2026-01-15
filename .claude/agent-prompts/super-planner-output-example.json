@@ -1,0 +1,208 @@
+{
+  "executive_summary": "Comprehensive fix plan for 9 issues across 6 files in the Coinswarm trading evolution system. Phase 1 addresses critical blocking bugs (dead Lamarckian evolution, division by zero, empty conditions guard). Phase 2 handles data integrity (R2 archival, slot backfilling) and documentation. Phase 3 fixes test infrastructure (MockD1 exec, RSI edge case, deterministic windows).",
+  "scope_constraints": [
+    "All fixes contained within cloudflare-agents directory",
+    "No changes to Python codebase (pyswarm/)",
+    "Preserves existing API contracts",
+    "Backward compatible with deployed workers",
+    "No changes to database schema (D1)"
+  ],
+  "design_considerations": [
+    {
+      "decision": "User clarified AI penalty is NOT a bug - working as designed",
+      "rationale": "Selection pressure mechanism, not real trading cost",
+      "impact": "No fix needed for equity curve penalty"
+    },
+    {
+      "decision": "R2 archival adds new binding to wrangler.toml",
+      "rationale": "User wants individual runs preserved for future agent analysis",
+      "impact": "Deployment requires R2 bucket configuration"
+    },
+    {
+      "decision": "Deterministic windows require system_config entries",
+      "rationale": "Fair pattern comparison requires same test data",
+      "impact": "Migration needed to add config rows"
+    }
+  ],
+  "implementation_roadmap": [
+    {
+      "phase": 1,
+      "name": "Critical Bug Fixes",
+      "priority": "BLOCKING",
+      "tasks": [
+        {
+          "id": "1.1",
+          "name": "Lamarckian Evolution Dead Code",
+          "file": "agents/base-trader-do.ts",
+          "lines": [1209, 1218, 613, 651],
+          "effort_minutes": 30,
+          "description": "Integrate recordAIPerformance() call with trade exit logic"
+        },
+        {
+          "id": "1.2",
+          "name": "Division by Zero in Pattern DO",
+          "file": "patterns/pattern-do.ts",
+          "lines": [500, 509, 529, 545],
+          "effort_minutes": 15,
+          "description": "Add minimum values for metrics when no runs exist"
+        },
+        {
+          "id": "1.3",
+          "name": "Empty Pattern Conditions Guard",
+          "file": "agents/base-trader-do.ts",
+          "lines": [870, 874],
+          "effort_minutes": 10,
+          "description": "Early return for empty conditions array"
+        }
+      ],
+      "dependencies": []
+    },
+    {
+      "phase": 2,
+      "name": "Data Integrity & Documentation",
+      "priority": "HIGH",
+      "tasks": [
+        {
+          "id": "2.1",
+          "name": "Pattern Rollup R2 Archival",
+          "file": "patterns/pattern-do.ts",
+          "lines": [396, 476],
+          "effort_minutes": 45,
+          "description": "Archive individual runs to R2 before rollup deletion"
+        },
+        {
+          "id": "2.2",
+          "name": "Document Pruning Thresholds",
+          "file": "pattern-fitness-evaluator.ts",
+          "lines": [61, 63],
+          "effort_minutes": 5,
+          "description": "Add documentation explaining infant protection period"
+        },
+        {
+          "id": "2.3",
+          "name": "Tested Patterns Slot Backfill",
+          "file": "pattern-fitness-evaluator.ts",
+          "lines": [384, 388],
+          "effort_minutes": 20,
+          "description": "Fill unused untested slots with tested patterns"
+        }
+      ],
+      "dependencies": ["phase1"]
+    },
+    {
+      "phase": 3,
+      "name": "Test Infrastructure Fixes",
+      "priority": "MEDIUM",
+      "tasks": [
+        {
+          "id": "3.1",
+          "name": "MockD1Database exec() Method",
+          "file": "tests/mocks/mock-d1.ts",
+          "lines": [128],
+          "effort_minutes": 30,
+          "description": "Add exec() method for multi-statement SQL execution"
+        },
+        {
+          "id": "3.2",
+          "name": "RSI Flat Prices Edge Case",
+          "file": "technical-indicators.ts",
+          "lines": [126, 128],
+          "effort_minutes": 15,
+          "description": "Return 50 (not 100) when prices are flat"
+        },
+        {
+          "id": "3.3",
+          "name": "Deterministic Candle Window Selection",
+          "file": "pattern-fitness-evaluator.ts",
+          "lines": ["new"],
+          "effort_minutes": 90,
+          "description": "All patterns in batch test on same data window"
+        }
+      ],
+      "dependencies": ["phase1"]
+    }
+  ],
+  "dependencies_risks": [
+    {
+      "risk": "R2 bucket not configured",
+      "impact": "Archival silently fails, data loss continues",
+      "mitigation": "Check env.PATTERN_ARCHIVE before archiving, log warning if missing"
+    },
+    {
+      "risk": "MockD1 exec() incomplete implementation",
+      "impact": "Tests still fail for complex SQL",
+      "mitigation": "Start with CREATE TABLE/INDEX only, expand as needed"
+    },
+    {
+      "risk": "Deterministic windows break parallel evaluation",
+      "impact": "Batches compete for same window lock",
+      "mitigation": "Use optimistic locking with retry"
+    }
+  ],
+  "open_questions": [
+    {
+      "question": "Should evolveAIPenaltyRate() be called on every trade or periodically?",
+      "context": "Currently defined but never called",
+      "suggested_answer": "Call during reproduction cycles (every N generations)"
+    },
+    {
+      "question": "What's the retention policy for R2 archives?",
+      "context": "Could grow unbounded over time",
+      "suggested_answer": "30 days default, lifecycle rule to move to Glacier equivalent"
+    },
+    {
+      "question": "Should deterministic windows be per-batch or global?",
+      "context": "Affects how parallel batches work",
+      "suggested_answer": "Per-batch to allow parallelism"
+    }
+  ],
+  "files_to_modify": {
+    "agents/base-trader-do.ts": {
+      "changes": 2,
+      "lines": "~630 (recordAIPerformance call), ~870 (empty conditions guard)"
+    },
+    "patterns/pattern-do.ts": {
+      "changes": 2,
+      "lines": "~396-476 (R2 archival), ~500-545 (zero-run handling)"
+    },
+    "pattern-fitness-evaluator.ts": {
+      "changes": 3,
+      "lines": "~61-63 (docs), ~384-388 (slot backfill), new window manager"
+    },
+    "technical-indicators.ts": {
+      "changes": 1,
+      "lines": "~126-128 (RSI flat price)"
+    },
+    "tests/mocks/mock-d1.ts": {
+      "changes": 1,
+      "lines": "~128+ (new exec method)"
+    },
+    "wrangler.toml": {
+      "changes": 1,
+      "lines": "Add R2 bucket binding"
+    }
+  },
+  "total_effort_hours": 4.33,
+  "success_criteria": [
+    "AI performance table receives data after AI-assisted trades exit",
+    "Patterns with zero runs have fitness > 0 (neutral, not zero)",
+    "Empty conditions array returns { matched: false, confidence: 0 }",
+    "Pattern runs archived to R2 before rollup deletion",
+    "Tested patterns fill 100% of slots when no untested remain",
+    "MockD1Database.exec() works for CREATE TABLE statements",
+    "RSI returns 50 for flat prices (all same close)",
+    "Patterns in same batch evaluate on identical time window"
+  ],
+  "not_fixing": [
+    {
+      "item": "Equity Curve AI Penalty",
+      "reason": "User clarified: working as designed - selection pressure, not real cost"
+    },
+    {
+      "item": "Fitness Floor 30% Threshold",
+      "reason": "Verified correct - floor only rises when <30% untested"
+    }
+  ],
+  "created_at": "2025-12-08T00:00:00Z",
+  "created_by": "super-planner-agent"
+}

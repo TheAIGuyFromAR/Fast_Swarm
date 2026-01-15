@@ -1,0 +1,635 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Coinswarm Research Paper Schema",
+  "description": "Schema for validating paper files in the research compendium",
+  "type": "object",
+  "required": [
+    "paper_id",
+    "title",
+    "authors",
+    "published",
+    "url",
+    "category",
+    "implementation_status",
+    "implementation_priority",
+    "concepts",
+    "tags"
+  ],
+  "properties": {
+    "paper_id": {
+      "type": "string",
+      "pattern": "^arxiv-\\d{4}\\.\\d{4,5}$|^doi-.*$|^isbn-.*$",
+      "description": "Unique paper identifier (arxiv-XXXX.XXXXX format preferred)"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 5,
+      "description": "Full paper title"
+    },
+    "authors": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1,
+      "description": "List of author names"
+    },
+    "published": {
+      "type": "string",
+      "pattern": "^\\d{4}(-\\d{2})?$",
+      "description": "Publication date (YYYY or YYYY-MM)"
+    },
+    "url": {
+      "type": "string",
+      "format": "uri",
+      "description": "URL to the paper"
+    },
+    "category": {
+      "type": "string",
+      "enum": [
+        "multi-agent-llm",
+        "agent-orchestration",
+        "memory-augmented",
+        "multi-agent-risk",
+        "hierarchical-execution",
+        "genetic-trading",
+        "reliability",
+        "modal-fusion",
+        "verbal-feedback",
+        "position-sizing",
+        "risk-management",
+        "regime-detection",
+        "sentiment-analysis",
+        "technical-analysis",
+        "fundamental-analysis",
+        "portfolio-optimization",
+        "execution-algorithms",
+        "market-microstructure",
+        "reinforcement-learning",
+        "deep-learning",
+        "transformer",
+        "attention-mechanism",
+        "explainable-ai",
+        "llm-finance",
+        "high-frequency-trading",
+        "market-making",
+        "order-book-analysis",
+        "price-prediction",
+        "volatility-modeling",
+        "factor-investing",
+        "behavioral-finance",
+        "news-sentiment",
+        "social-media-analysis",
+        "alternative-data",
+        "cryptocurrency",
+        "defi",
+        "options-trading",
+        "futures-trading",
+        "pairs-trading",
+        "statistical-arbitrage",
+        "mean-reversion",
+        "momentum",
+        "trend-following",
+        "breakout",
+        "support-resistance",
+        "pattern-recognition",
+        "anomaly-detection",
+        "time-series",
+        "feature-engineering"
+      ],
+      "description": "Primary category for the paper"
+    },
+    "implementation_status": {
+      "type": "string",
+      "enum": ["VALIDATES", "READ+IMPL", "READ+PARTIAL", "READ+SKIP", "NEW"],
+      "description": "Current implementation status"
+    },
+    "implementation_priority": {
+      "type": "string",
+      "enum": ["P0", "P1", "P2", "P3"],
+      "description": "Implementation priority level"
+    },
+    "coinswarm_components": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "List of Coinswarm components this paper relates to"
+    },
+    "related_traits": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 16
+      },
+      "description": "List of related trait numbers (1-16)"
+    },
+    "related_phases": {
+      "type": "array",
+      "items": { "type": "integer" },
+      "description": "Related phase numbers from implementation roadmap"
+    },
+    "validates": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Paper IDs this validates"
+    },
+    "validates_files": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "File paths to papers this validates"
+    },
+    "extends": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Paper IDs this extends"
+    },
+    "extends_files": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "File paths to papers this extends"
+    },
+    "contradicts": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Paper IDs with conflicting findings"
+    },
+    "contradicts_files": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "File paths to contradicting papers"
+    },
+    "cites": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Key citation paper IDs"
+    },
+    "cites_files": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "File paths to cited papers"
+    },
+    "cited_by": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Paper IDs that cite this (auto-populated)"
+    },
+    "cited_by_files": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "File paths to papers that cite this"
+    },
+    "related_concept_files": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Paths to related concept files"
+    },
+    "related_architecture_files": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Paths to related architecture files"
+    },
+    "related_code_files": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Paths to related code files"
+    },
+    "similar_papers_files": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Paths to similar papers (auto-generated)"
+    },
+    "concepts": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1,
+      "description": "Key concepts for semantic search"
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1,
+      "description": "Tags for filtering"
+    },
+    "implementation_estimate": {
+      "type": "object",
+      "properties": {
+        "complexity": {
+          "type": "integer",
+          "enum": [1, 2, 3, 5, 8, 13, 21, 34, 55, 89],
+          "description": "Fibonacci complexity estimate"
+        },
+        "uncertainty": {
+          "type": "integer",
+          "enum": [1, 2, 3, 5, 8, 13, 21, 34, 55, 89],
+          "description": "Fibonacci uncertainty estimate"
+        },
+        "dependencies": {
+          "type": "integer",
+          "enum": [1, 2, 3, 5, 8, 13, 21, 34, 55, 89],
+          "description": "Fibonacci dependencies estimate"
+        },
+        "total_fib": {
+          "type": "integer",
+          "description": "Total Fibonacci estimate"
+        }
+      },
+      "required": ["complexity", "uncertainty", "dependencies", "total_fib"]
+    },
+    "tshirt_size": {
+      "type": "string",
+      "enum": ["XS", "S", "M", "L", "XL", "XXL"],
+      "description": "Overall T-shirt size estimate"
+    },
+    "tshirt_breakdown": {
+      "type": "object",
+      "properties": {
+        "code_changes": {
+          "type": "string",
+          "enum": ["XS", "S", "M", "L", "XL", "XXL"]
+        },
+        "testing_effort": {
+          "type": "string",
+          "enum": ["XS", "S", "M", "L", "XL", "XXL"]
+        },
+        "integration_work": {
+          "type": "string",
+          "enum": ["XS", "S", "M", "L", "XL", "XXL"]
+        }
+      }
+    },
+    "prerequisites": {
+      "type": "object",
+      "properties": {
+        "systems": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "data": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "papers_to_read_first": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "data_requirements": {
+      "type": "object",
+      "properties": {
+        "required_data_types": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "data_sources_mentioned": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "required": { "type": "boolean" },
+              "alternative": { "type": "string" }
+            }
+          }
+        },
+        "sample_size": {
+          "type": "object",
+          "properties": {
+            "min_training_samples": { "type": ["integer", "null"] },
+            "min_test_samples": { "type": ["integer", "null"] },
+            "time_period_months": { "type": ["integer", "null"] },
+            "assets_tested": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "data_frequency": {
+          "type": "object",
+          "properties": {
+            "primary": { "type": "string" },
+            "secondary": { "type": "array", "items": { "type": "string" } },
+            "real_time_required": { "type": "boolean" }
+          }
+        },
+        "data_availability": {
+          "type": "object",
+          "properties": {
+            "have": { "type": "array", "items": { "type": "string" } },
+            "need": { "type": "array", "items": { "type": "string" } },
+            "gap_severity": {
+              "type": "string",
+              "enum": ["low", "medium", "high", "blocking"]
+            }
+          }
+        }
+      }
+    },
+    "algorithm_details": {
+      "type": "object",
+      "properties": {
+        "model_type": {
+          "type": "string",
+          "enum": ["rule-based", "ml-classification", "ml-regression", "rl", "llm", "hybrid", "ensemble"]
+        },
+        "model_category": {
+          "type": "string",
+          "enum": ["signal-generation", "risk-management", "execution", "portfolio-optimization", "decision-system"]
+        },
+        "algorithms_used": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "purpose": { "type": "string" },
+              "replaceable_with": { "type": "string" }
+            }
+          }
+        },
+        "hyperparameters": { "type": "object" },
+        "training": {
+          "type": "object",
+          "properties": {
+            "required": { "type": "boolean" },
+            "training_data_size": { "type": ["string", "null"] },
+            "training_time_estimate": { "type": ["string", "null"] },
+            "gpu_required": { "type": "boolean" },
+            "fine_tuning_needed": { "type": "boolean" }
+          }
+        },
+        "inference": {
+          "type": "object",
+          "properties": {
+            "latency_requirement": {
+              "type": "string",
+              "enum": ["milliseconds", "seconds", "minutes", "hours"]
+            },
+            "batch_or_realtime": {
+              "type": "string",
+              "enum": ["batch", "realtime"]
+            },
+            "api_calls_per_decision": { "type": "integer" },
+            "cost_per_decision_usd": { "type": "number" }
+          }
+        }
+      }
+    },
+    "reproducibility": {
+      "type": "object",
+      "properties": {
+        "code_available": { "type": "boolean" },
+        "code_url": { "type": ["string", "null"] },
+        "code_language": { "type": ["string", "null"] },
+        "docker_available": { "type": "boolean" },
+        "pretrained_weights": { "type": "boolean" },
+        "reproduction_difficulty": {
+          "type": "string",
+          "enum": ["easy", "medium", "hard", "impossible"]
+        },
+        "reproduction_blockers": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "claims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "metric": { "type": "string" },
+          "value": { "type": "number" },
+          "context": { "type": "string" },
+          "baseline_comparison": { "type": "string" },
+          "baseline_value": { "type": "number" },
+          "improvement_pct": { "type": "number" },
+          "statistically_significant": { "type": "boolean" },
+          "p_value": { "type": "number" }
+        },
+        "required": ["metric", "value", "context"]
+      }
+    },
+    "claim_assessment": {
+      "type": "object",
+      "properties": {
+        "overall_credibility": {
+          "type": "string",
+          "enum": ["low", "medium", "high"]
+        },
+        "concerns": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "strengths": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "coinswarm_integration": {
+      "type": "object",
+      "properties": {
+        "target_components": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "component": { "type": "string" },
+              "file_path": { "type": "string" },
+              "integration_type": {
+                "type": "string",
+                "enum": ["new_feature", "enhancement", "replacement"]
+              }
+            }
+          }
+        },
+        "trait_implications": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "trait_number": { "type": "integer", "minimum": 1, "maximum": 16 },
+              "trait_name": { "type": "string" },
+              "implication": { "type": "string" },
+              "confidence": {
+                "type": "string",
+                "enum": ["low", "medium", "high"]
+              }
+            }
+          }
+        },
+        "phase_relevance": {
+          "type": "object",
+          "properties": {
+            "primary_phase": { "type": ["integer", "null"] },
+            "secondary_phases": { "type": "array", "items": { "type": "integer" } },
+            "phase_task_ids": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "design_conflicts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "conflict": { "type": "string" },
+              "resolution": { "type": "string" },
+              "resolved": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    },
+    "risk_analysis": {
+      "type": "object",
+      "properties": {
+        "failure_modes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "mode": { "type": "string" },
+              "likelihood": { "type": "string", "enum": ["low", "medium", "high"] },
+              "severity": { "type": "string", "enum": ["low", "medium", "high"] },
+              "mitigation": { "type": "string" }
+            }
+          }
+        },
+        "adverse_conditions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "condition": { "type": "string" },
+              "expected_behavior": { "type": "string" },
+              "risk_level": { "type": "string", "enum": ["low", "medium", "high"] }
+            }
+          }
+        },
+        "worst_case_scenarios": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "scenario": { "type": "string" },
+              "max_loss_pct": { "type": "number" },
+              "recovery_time_estimate": { "type": "string" }
+            }
+          }
+        },
+        "required_safeguards": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "compliance_notes": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "author_stated_limitations": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "our_concerns": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "concern": { "type": "string" },
+          "severity": { "type": "string", "enum": ["low", "medium", "high"] },
+          "workaround": { "type": "string" }
+        }
+      }
+    },
+    "historical_context": {
+      "type": "object",
+      "properties": {
+        "foundational_papers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "paper_id": { "type": "string" },
+              "title": { "type": "string" },
+              "relationship": { "type": "string" },
+              "year": { "type": "integer" }
+            }
+          }
+        },
+        "evolution_timeline": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "year": { "type": "integer" },
+              "milestone": { "type": "string" },
+              "relevance": { "type": "string" }
+            }
+          }
+        },
+        "paradigm": {
+          "type": "string",
+          "enum": ["classical-ta", "ml-prediction", "rl-optimization", "llm-reasoning", "multi-agent-llm"]
+        },
+        "paradigm_maturity": {
+          "type": "string",
+          "enum": ["established", "mature", "emerging", "experimental"]
+        },
+        "obsolescence_risk": {
+          "type": "object",
+          "properties": {
+            "risk_level": { "type": "string", "enum": ["low", "medium", "high"] },
+            "potential_successors": { "type": "array", "items": { "type": "string" } },
+            "estimated_relevance_years": { "type": "integer" }
+          }
+        },
+        "innovations_vs_prior": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "vs_paper": { "type": "string" },
+              "innovation": { "type": "string" }
+            }
+          }
+        },
+        "subsequent_work": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "paper_id": { "type": "string" },
+              "title": { "type": "string" },
+              "relationship": { "type": "string" },
+              "improvement": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "research_trends": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "trend": { "type": "string" },
+          "alignment": { "type": "string", "enum": ["low", "medium", "high"] },
+          "trend_direction": { "type": "string", "enum": ["growing", "stable", "declining"] }
+        }
+      }
+    },
+    "industry_adoption": {
+      "type": "object",
+      "properties": {
+        "adoption_level": {
+          "type": "string",
+          "enum": ["none", "experimental", "early", "mainstream"]
+        },
+        "known_implementations": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "barriers_to_adoption": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pattern Leaderboard - Coinswarm</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #e4e4e7;
+            padding: 20px;
+            min-height: 100vh;
+        }
+        .container { max-width: 1800px; margin: 0 auto; }
+        header {
+            background: rgba(255,255,255,0.05);
+            padding: 20px 30px;
+            border-radius: 10px;
+            border: 1px solid rgba(255,255,255,0.1);
+            margin-bottom: 30px;
+        }
+        h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            background: linear-gradient(90deg, #60a5fa, #a78bfa);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .subtitle { color: #9ca3af; font-size: 1.1em; }
+        nav { margin-top: 20px; display: flex; gap: 10px; flex-wrap: wrap; }
+        nav a {
+            background: rgba(96, 165, 250, 0.2);
+            color: #60a5fa;
+            padding: 10px 20px;
+            border-radius: 5px;
+            text-decoration: none;
+            border: 1px solid rgba(96, 165, 250, 0.3);
+            transition: all 0.3s;
+        }
+        nav a:hover { background: rgba(96, 165, 250, 0.3); }
+        nav a.active { background: #60a5fa; color: #1a1a2e; }
+
+        .stats-bar {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .stat-card {
+            background: rgba(255,255,255,0.05);
+            padding: 20px;
+            border-radius: 10px;
+            border: 1px solid rgba(255,255,255,0.1);
+            text-align: center;
+        }
+        .stat-value { font-size: 2em; font-weight: bold; color: #60a5fa; margin-bottom: 5px; }
+        .stat-value.green { color: #34d399; }
+        .stat-value.yellow { color: #fbbf24; }
+        .stat-label { color: #9ca3af; font-size: 0.85em; }
+
+        .leaderboard {
+            background: rgba(255,255,255,0.05);
+            border-radius: 10px;
+            border: 1px solid rgba(255,255,255,0.1);
+            overflow: hidden;
+        }
+        .leaderboard-header {
+            background: linear-gradient(90deg, #3b82f6, #8b5cf6);
+            color: white;
+            padding: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+        .leaderboard-title { font-size: 1.5em; font-weight: bold; }
+        .sort-controls { display: flex; gap: 10px; flex-wrap: wrap; }
+        .sort-btn {
+            padding: 8px 16px;
+            background: rgba(255,255,255,0.2);
+            color: white;
+            border: 2px solid white;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+        .sort-btn:hover, .sort-btn.active {
+            background: white;
+            color: #3b82f6;
+        }
+
+        table { width: 100%; border-collapse: collapse; }
+        thead { background: rgba(255,255,255,0.05); }
+        th {
+            padding: 15px;
+            text-align: left;
+            font-weight: 600;
+            color: #60a5fa;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        td { padding: 15px; border-bottom: 1px solid rgba(255,255,255,0.05); }
+        tr:hover { background: rgba(255,255,255,0.03); cursor: pointer; }
+
+        .rank { font-size: 1.3em; font-weight: bold; color: #60a5fa; width: 60px; text-align: center; }
+        .rank-1 { color: #FFD700; }
+        .rank-2 { color: #C0C0C0; }
+        .rank-3 { color: #CD7F32; }
+
+        .metric { font-weight: 600; font-size: 1.05em; }
+        .metric-positive { color: #34d399; }
+        .metric-negative { color: #f87171; }
+        .metric-neutral { color: #9ca3af; }
+
+        .fitness-bar {
+            width: 120px;
+            height: 10px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 10px;
+            overflow: hidden;
+            display: inline-block;
+            vertical-align: middle;
+            margin-left: 10px;
+        }
+        .fitness-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #3b82f6, #8b5cf6);
+        }
+
+        .details { background: rgba(255,255,255,0.02); display: none; }
+        .details.show { display: table-row; }
+        .details td { padding: 20px; }
+        .details-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+        }
+        .detail-item {
+            background: rgba(255,255,255,0.05);
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .detail-label { font-size: 0.75em; color: #9ca3af; margin-bottom: 5px; text-transform: uppercase; }
+        .detail-value { font-size: 1.2em; font-weight: bold; color: #60a5fa; }
+
+        .loading, .no-data { text-align: center; padding: 40px; color: #9ca3af; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Pattern Leaderboard</h1>
+            <p class="subtitle">FastAPI Monitoring - Top Performing Patterns</p>
+            <nav>
+                <a href="patterns.html" class="active">Patterns</a>
+                <a href="agents.html">Agents</a>
+            </nav>
+        </header>
+
+        <div class="stats-bar">
+            <div class="stat-card">
+                <div class="stat-value" id="stat-total">-</div>
+                <div class="stat-label">Total Patterns</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value green" id="stat-avg-fitness">-</div>
+                <div class="stat-label">Avg Fitness</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value green" id="stat-top-fitness">-</div>
+                <div class="stat-label">Top Fitness</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value yellow" id="stat-avg-roi">-</div>
+                <div class="stat-label">Avg ROI</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="stat-avg-sharpe">-</div>
+                <div class="stat-label">Avg Sharpe</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="stat-avg-win-rate">-</div>
+                <div class="stat-label">Avg Win Rate</div>
+            </div>
+        </div>
+
+        <div class="leaderboard">
+            <div class="leaderboard-header">
+                <div class="leaderboard-title">Top 100 Patterns</div>
+                <div class="sort-controls">
+                    <button class="sort-btn active" data-sort="fitness_score">Fitness</button>
+                    <button class="sort-btn" data-sort="annualized_roi_pct">ROI</button>
+                    <button class="sort-btn" data-sort="sharpe_ratio">Sharpe</button>
+                    <button class="sort-btn" data-sort="sortino_ratio">Sortino</button>
+                    <button class="sort-btn" data-sort="win_rate">Win Rate</button>
+                </div>
+            </div>
+
+            <div id="table-container">
+                <div class="loading">Loading patterns...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:8000';
+        let patternsData = [];
+        let currentSort = 'fitness_score';
+
+        async function fetchPatterns() {
+            try {
+                const [patternsRes, statsRes] = await Promise.all([
+                    fetch(`${API_URL}/patterns?limit=100`),
+                    fetch(`${API_URL}/patterns/stats/average`)
+                ]);
+
+                if (!patternsRes.ok || !statsRes.ok) throw new Error('API Error');
+
+                patternsData = await patternsRes.json();
+                const stats = await statsRes.json();
+
+                sortAndRender();
+                updateStats(stats);
+            } catch (error) {
+                console.error('Error fetching patterns:', error);
+                document.getElementById('table-container').innerHTML = 
+                    '<div class="no-data">Error loading patterns. Make sure FastAPI is running on port 8000.</div>';
+            }
+        }
+
+        function sortPatterns() {
+            patternsData.sort((a, b) => (b[currentSort] || 0) - (a[currentSort] || 0));
+        }
+
+        function sortAndRender() {
+            sortPatterns();
+            renderTable();
+        }
+
+        function renderTable() {
+            if (patternsData.length === 0) {
+                document.getElementById('table-container').innerHTML = 
+                    '<div class="no-data">No patterns found.</div>';
+                return;
+            }
+
+            let html = '<table><thead><tr>';
+            html += '<th>Rank</th>';
+            html += '<th>Pattern ID</th>';
+            html += '<th>Fitness</th>';
+            html += '<th>ROI %</th>';
+            html += '<th>Sharpe</th>';
+            html += '<th>Sortino</th>';
+            html += '<th>Win Rate</th>';
+            html += '<th>Max DD</th>';
+            html += '</tr></thead><tbody>';
+
+            patternsData.forEach((pattern, index) => {
+                const rank = index + 1;
+                const rankClass = rank <= 3 ? `rank-${rank}` : '';
+                const fitness = pattern.fitness_score || 0;
+                const roi = pattern.annualized_roi_pct || 0;
+                const sharpe = pattern.sharpe_ratio || 0;
+                const sortino = pattern.sortino_ratio || 0;
+                const winRate = pattern.win_rate ? pattern.win_rate * 100 : 0;
+                const maxDD = pattern.max_drawdown_pct || 0;
+
+                const roiClass = roi >= 10 ? 'metric-positive' : roi < 0 ? 'metric-negative' : 'metric-neutral';
+                const sharpeClass = sharpe >= 1.5 ? 'metric-positive' : sharpe < 0.5 ? 'metric-negative' : 'metric-neutral';
+                const sortinoClass = sortino >= 2.0 ? 'metric-positive' : sortino < 0.5 ? 'metric-negative' : 'metric-neutral';
+                const wrClass = winRate >= 55 ? 'metric-positive' : winRate < 45 ? 'metric-negative' : 'metric-neutral';
+
+                html += `<tr onclick="toggleDetails('${pattern.pattern_id}')">`;
+                html += `<td class="rank ${rankClass}">${rank}</td>`;
+                html += `<td style="font-family: monospace; font-size: 0.85em;">${pattern.pattern_id.slice(0, 16)}...</td>`;
+                html += `<td><span class="metric metric-positive">${fitness.toFixed(1)}</span>`;
+                html += `<div class="fitness-bar"><div class="fitness-fill" style="width: ${Math.min(fitness, 100)}%"></div></div></td>`;
+                html += `<td class="metric ${roiClass}">${roi.toFixed(1)}%</td>`;
+                html += `<td class="metric ${sharpeClass}">${sharpe.toFixed(2)}</td>`;
+                html += `<td class="metric ${sortinoClass}">${sortino.toFixed(2)}</td>`;
+                html += `<td class="metric ${wrClass}">${winRate.toFixed(1)}%</td>`;
+                html += `<td class="metric ${maxDD < 15 ? 'metric-positive' : 'metric-negative'}">${maxDD.toFixed(1)}%</td>`;
+                html += `</tr>`;
+
+                // Details row
+                html += `<tr id="details-${pattern.pattern_id}" class="details">`;
+                html += `<td colspan="8"><div class="details-grid">`;
+                html += `<div class="detail-item"><div class="detail-label">Total Trades</div><div class="detail-value">${pattern.total_trades || 0}</div></div>`;
+                html += `<div class="detail-item"><div class="detail-label">Calmar</div><div class="detail-value">${(pattern.calmar_ratio || 0).toFixed(2)}</div></div>`;
+                html += `<div class="detail-item"><div class="detail-label">Profit Factor</div><div class="detail-value">${(pattern.profit_factor || 0).toFixed(2)}</div></div>`;
+                html += `<div class="detail-item"><div class="detail-label">Avg Trade</div><div class="detail-value">${(pattern.avg_trade_pct || 0).toFixed(2)}%</div></div>`;
+                html += `<div class="detail-item"><div class="detail-label">Full ID</div><div class="detail-value" style="font-size: 0.6em;">${pattern.pattern_id}</div></div>`;
+                html += `</div></td></tr>`;
+            });
+
+            html += '</tbody></table>';
+            document.getElementById('table-container').innerHTML = html;
+        }
+
+        function toggleDetails(patternId) {
+            const detailsRow = document.getElementById(`details-${patternId}`);
+            if (detailsRow) detailsRow.classList.toggle('show');
+        }
+
+        function updateStats(stats) {
+            document.getElementById('stat-total').textContent = patternsData.length;
+            document.getElementById('stat-avg-fitness').textContent = stats.avg_fitness?.toFixed(1) || '-';
+            document.getElementById('stat-top-fitness').textContent = stats.max_fitness?.toFixed(1) || '-';
+            document.getElementById('stat-avg-roi').textContent = stats.avg_roi ? stats.avg_roi.toFixed(1) + '%' : '-';
+            document.getElementById('stat-avg-sharpe').textContent = stats.avg_sharpe?.toFixed(2) || '-';
+            document.getElementById('stat-avg-win-rate').textContent = stats.avg_win_rate ? (stats.avg_win_rate * 100).toFixed(1) + '%' : '-';
+        }
+
+        // Sort button handlers
+        document.querySelectorAll('.sort-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                document.querySelectorAll('.sort-btn').forEach(b => b.classList.remove('active'));
+                this.classList.add('active');
+                currentSort = this.dataset.sort;
+                sortAndRender();
+            });
+        });
+
+        // Fetch on load
+        fetchPatterns();
+
+        // Auto-refresh every 30 seconds
+        setInterval(fetchPatterns, 30000);
+    </script>
+</body>
+</html>

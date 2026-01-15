@@ -1,0 +1,4 @@
+# file: C:\Users\Admin\Documents\Fast_Swarm\Config\feature_flags.py
+# hypothesis_version: 6.148.11
+
+['1', 'FeatureFlags', 'backtest_engine', 'backtest_service', 'blue', 'cull_service', 'enable_chaos_testing', 'evolution_service', 'fitness_service', 'global_version', 'green', 'on', 'ranking_service', 'spawn_service', 'true', 'yes']

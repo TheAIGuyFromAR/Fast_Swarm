@@ -1,0 +1,4 @@
+# file: C:\Users\Admin\Documents\Fast_Swarm\Constants\evolution_rules.py
+# hypothesis_version: 6.148.11
+
+[0.01, 0.05, 0.1, 0.2, 0.5, 0.7, 20.0, 32.0, 80.0, 100.0, 1500.0, 3000.0, 100, 150, 300, 500, 1000, 10000, 'adaptability', 'breakout_preference', 'drawdown_sensitivity', 'entry_aggression', 'exit_aggression', 'hold_duration_bias', 'lookback_preference', 'mean_reversion', 'news_reactivity', 'patience', 'profit_target_greed', 'risk_tolerance', 'sentiment_contrarian', 'sentiment_weight', 'stop_loss_tightness', 'trend_following', 'volatility_seeking', 'volume_sensitivity', 'win_rate_preference']

@@ -1,0 +1,4 @@
+# file: C:\Users\Admin\Documents\Fast_Swarm\Tests\Fixtures\canonical_patterns.py
+# hypothesis_version: 6.148.11
+
+[0.05, 0.15, 1.0, 2.0, 5.0, ', ', '1d', '1h', '4h', '<', '<=', '>', '>=', 'BB Lower Band Touch', 'Death Cross', 'Golden Cross', 'MACD Bearish Cross', 'MACD Bullish Cross', 'Momentum Surge', 'RSI Overbought', 'RSI Oversold', 'Volume Breakout', 'bb_lower_touch', 'bb_squeeze', 'bb_width', 'canonical-bb-squeeze', 'crossover', 'death_cross', 'description', 'direction', 'entry_conditions', 'exit_conditions', 'full_arsenal', 'golden_cross', 'indicator', 'long', 'macd_bearish_cross', 'macd_bullish_cross', 'macd_histogram', 'mean_reversion_suite', 'momentum_surge', 'name', 'operator', 'pattern_id', 'price_condition', 'price_vs_bb_lower', 'price_vs_bb_middle', 'price_vs_high_20', 'roc_10', 'rsi_14', 'rsi_macd_combo', 'rsi_overbought', 'rsi_oversold', 'short', 'sma_50_vs_200', 'timeframes', 'trailing_stop', 'value', 'volume_breakout', 'volume_vs_avg']

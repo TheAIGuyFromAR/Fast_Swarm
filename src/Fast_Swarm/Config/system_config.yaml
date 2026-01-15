@@ -1,0 +1,81 @@
+# Fast_Swarm System Configuration
+# This file is the source of truth for deploys.
+# Changes made via API are synced back every 6 hours.
+
+evolution:
+  # Population management
+  population_size: 500
+  generations: 5
+
+  # Selection pressures
+  elite_percent: 0.20        # Top % preserved unchanged
+  survival_percent: 0.60     # Top % that survive to reproduce
+  mutation_rate: 0.15        # Probability of trait mutation
+
+  # Trading universe
+  assets:
+    - BTC
+    - ETH
+    - SOL
+    - BNB
+    - XRP
+    - ADA
+    - AVAX
+    - DOGE
+
+  # Primary timeframe for evolution cycles
+  timeframe: "1h"
+
+backtest:
+  # Window generation
+  windows_per_asset_per_tf: 20
+
+  # Regime importance weights for fitness calculation
+  # Higher weights = harder conditions worth more
+  regime_weights:
+    # Random windows (baseline)
+    random: 1.0
+
+    # Canonical periods (stress tests)
+    crash: 3.0       # e.g., COVID crash, FTX collapse
+    sideways: 2.5    # Choppy, no clear trend
+    bear: 2.0        # Sustained downtrend
+    bull: 1.5        # Sustained uptrend
+    blowoff: 2.0     # Parabolic top / capitulation
+    recovery: 1.5    # Post-crash bounce
+
+  # Minimum trades for statistical significance
+  min_trades_for_regime: 5
+  min_trades_for_matrix: 3
+
+  # Timeframe configuration (candles per window)
+  timeframe_config:
+    1m:  { candles: 1440 }   # ~1 day
+    5m:  { candles: 1440 }   # ~5 days
+    15m: { candles: 960 }    # ~10 days
+    1h:  { candles: 720 }    # ~30 days
+    4h:  { candles: 360 }    # ~60 days
+    1d:  { candles: 180 }    # ~6 months
+
+patterns:
+  # Discovery loop timing
+  discovery_interval_hours: 6
+
+  # Backtest loop timing
+  backtest_interval_minutes: 10
+
+  # Fitness thresholds
+  min_fitness_for_active: 30.0
+  cull_threshold: 10.0
+
+tasks:
+  # Background task supervision
+  max_restarts: 5
+  restart_backoff_seconds: 5
+
+  # Chaos/robustness testing
+  chaos_interval_minutes: 30
+
+sync:
+  # Config sync interval (DB -> YAML)
+  interval_hours: 6

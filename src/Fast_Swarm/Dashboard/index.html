@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CoinSwarm Command Center</title>
+    <link rel="stylesheet" href="/dashboard/css/cyberpunk.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="main-header">
+            <div class="header-left">
+                <h1 class="logo">
+                    <span class="logo-icon">&#9670;</span>
+                    COINSWARM
+                </h1>
+                <span class="subtitle">COMMAND CENTER</span>
+            </div>
+            <div class="header-right">
+                <div class="status-indicator" id="system-status">
+                    <span class="status-dot"></span>
+                    <span class="status-text">ONLINE</span>
+                </div>
+                <div class="clock" id="clock">--:--:--</div>
+            </div>
+        </header>
+
+        <!-- Navigation -->
+        <nav class="main-nav">
+            <button class="nav-btn active" data-page="orchestrator">
+                <span class="nav-icon">&#9881;</span>
+                ORCHESTRATOR
+            </button>
+            <button class="nav-btn" data-page="market">
+                <span class="nav-icon">&#9670;</span>
+                MARKET
+            </button>
+            <button class="nav-btn" data-page="patterns">
+                <span class="nav-icon">&#9632;</span>
+                PATTERNS
+            </button>
+            <button class="nav-btn" data-page="agents">
+                <span class="nav-icon">&#9733;</span>
+                AGENTS
+            </button>
+            <button class="nav-btn" data-page="trades">
+                <span class="nav-icon">&#8644;</span>
+                TRADES
+            </button>
+        </nav>
+
+        <!-- Main Content Area -->
+        <main class="content-area">
+            <!-- Page: Orchestrator -->
+            <section class="page active" id="page-orchestrator">
+                <!-- Phase HUD Row -->
+                <div class="hud-row">
+                    <div class="phase-card">
+                        <div class="phase-ring" data-progress="0">
+                            <svg viewBox="0 0 100 100">
+                                <circle class="ring-bg" cx="50" cy="50" r="45" fill="none"/>
+                                <circle class="ring-progress" cx="50" cy="50" r="45" fill="none" id="phase-chaos-ring"/>
+                            </svg>
+                            <div class="phase-label">CHAOS</div>
+                        </div>
+                        <div class="phase-status" id="phase-chaos-status">IDLE</div>
+                    </div>
+                    <div class="phase-card">
+                        <div class="phase-ring" data-progress="0">
+                            <svg viewBox="0 0 100 100">
+                                <circle class="ring-bg" cx="50" cy="50" r="45" fill="none"/>
+                                <circle class="ring-progress" cx="50" cy="50" r="45" fill="none" id="phase-discovery-ring"/>
+                            </svg>
+                            <div class="phase-label">DISCOVERY</div>
+                        </div>
+                        <div class="phase-status" id="phase-discovery-status">IDLE</div>
+                    </div>
+                    <div class="phase-card">
+                        <div class="phase-ring" data-progress="0">
+                            <svg viewBox="0 0 100 100">
+                                <circle class="ring-bg" cx="50" cy="50" r="45" fill="none"/>
+                                <circle class="ring-progress" cx="50" cy="50" r="45" fill="none" id="phase-backtest-ring"/>
+                            </svg>
+                            <div class="phase-label">BACKTEST</div>
+                        </div>
+                        <div class="phase-status" id="phase-backtest-status">IDLE</div>
+                    </div>
+                    <div class="phase-card">
+                        <div class="phase-ring" data-progress="0">
+                            <svg viewBox="0 0 100 100">
+                                <circle class="ring-bg" cx="50" cy="50" r="45" fill="none"/>
+                                <circle class="ring-progress" cx="50" cy="50" r="45" fill="none" id="phase-select-ring"/>
+                            </svg>
+                            <div class="phase-label">SELECT</div>
+                        </div>
+                        <div class="phase-status" id="phase-select-status">IDLE</div>
+                    </div>
+                </div>
+
+                <!-- Metrics Row -->
+                <div class="metrics-row">
+                    <div class="metric-card">
+                        <div class="metric-header">ACTIVE AGENTS</div>
+                        <div class="metric-value" id="metric-agents">--</div>
+                        <div class="metric-bar"><div class="metric-fill cyan" id="agents-bar" style="width: 0%"></div></div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-header">AVG FITNESS</div>
+                        <div class="metric-value" id="metric-fitness">--</div>
+                        <div class="metric-bar"><div class="metric-fill green" id="fitness-bar" style="width: 0%"></div></div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-header">TOP ELO</div>
+                        <div class="metric-value" id="metric-elo">--</div>
+                        <div class="metric-bar"><div class="metric-fill magenta" id="elo-bar" style="width: 0%"></div></div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-header">PATTERNS</div>
+                        <div class="metric-value" id="metric-patterns">--</div>
+                        <div class="metric-bar"><div class="metric-fill yellow" id="patterns-bar" style="width: 0%"></div></div>
+                    </div>
+                </div>
+
+                <!-- Controls + Chart Row -->
+                <div class="controls-chart-row">
+                    <div class="controls-panel">
+                        <div class="panel-header">TACTICAL CONTROLS</div>
+                        <div class="controls-grid">
+                            <button class="action-btn primary" id="btn-evolution">
+                                <span class="btn-icon">&#9654;</span>
+                                START EVOLUTION
+                            </button>
+                            <button class="action-btn" id="btn-spawn">
+                                <span class="btn-icon">+</span>
+                                SPAWN AGENTS
+                            </button>
+                            <button class="action-btn" id="btn-backtest">
+                                <span class="btn-icon">&#8635;</span>
+                                RUN BACKTEST
+                            </button>
+                            <button class="action-btn warning" id="btn-cull">
+                                <span class="btn-icon">&#10006;</span>
+                                CULL WEAK
+                            </button>
+                            <button class="action-btn danger" id="btn-chaos">
+                                <span class="btn-icon">&#9888;</span>
+                                TRIGGER CHAOS
+                            </button>
+                            <button class="action-btn" id="btn-tests">
+                                <span class="btn-icon">&#10003;</span>
+                                RUN ALL TESTS
+                            </button>
+                        </div>
+                        <div class="slider-control">
+                            <label>PARALLELISM</label>
+                            <input type="range" min="1" max="10" value="4" id="parallelism-slider">
+                            <span class="slider-value" id="parallelism-value">4</span>
+                        </div>
+                    </div>
+                    <div class="chart-panel">
+                        <div class="panel-header">MUTATION KILL RATE</div>
+                        <canvas id="kill-rate-chart" width="400" height="200"></canvas>
+                    </div>
+                </div>
+
+                <!-- Activity Log -->
+                <div class="activity-panel">
+                    <div class="panel-header">ACTIVITY LOG</div>
+                    <div class="activity-log" id="activity-log">
+                        <div class="log-entry">
+                            <span class="log-time">--:--:--</span>
+                            <span class="log-component">[SYSTEM]</span>
+                            <span class="log-message">Dashboard initialized</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Page: Market -->
+            <section class="page" id="page-market">
+                <div class="page-header">
+                    <h2>MARKET INTELLIGENCE</h2>
+                </div>
+                <div class="market-grid">
+                    <div class="market-card wide">
+                        <div class="panel-header">FEAR & GREED INDEX</div>
+                        <div class="fear-greed-gauge">
+                            <div class="gauge-arc">
+                                <svg viewBox="0 0 200 120">
+                                    <path class="gauge-bg" d="M20,100 A80,80 0 0,1 180,100"/>
+                                    <path class="gauge-fill" d="M20,100 A80,80 0 0,1 180,100" id="fear-greed-arc"/>
+                                </svg>
+                                <div class="gauge-needle" id="fear-greed-needle"></div>
+                                <div class="gauge-value" id="fear-greed-value">--</div>
+                                <div class="gauge-label" id="fear-greed-label">LOADING</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="market-card">
+                        <div class="panel-header">BTC/USD</div>
+                        <div class="price-display">
+                            <span class="price-value" id="btc-price">$--,---</span>
+                            <span class="price-change positive" id="btc-change">+0.00%</span>
+                        </div>
+                        <canvas id="btc-chart" width="300" height="100"></canvas>
+                    </div>
+                    <div class="market-card">
+                        <div class="panel-header">ETH/USD</div>
+                        <div class="price-display">
+                            <span class="price-value" id="eth-price">$--,---</span>
+                            <span class="price-change positive" id="eth-change">+0.00%</span>
+                        </div>
+                        <canvas id="eth-chart" width="300" height="100"></canvas>
+                    </div>
+                    <div class="market-card">
+                        <div class="panel-header">SOL/USD</div>
+                        <div class="price-display">
+                            <span class="price-value" id="sol-price">$---.--</span>
+                            <span class="price-change positive" id="sol-change">+0.00%</span>
+                        </div>
+                        <canvas id="sol-chart" width="300" height="100"></canvas>
+                    </div>
+                    <div class="market-card">
+                        <div class="panel-header">BTC DOMINANCE</div>
+                        <div class="price-display">
+                            <span class="price-value" id="btc-dominance-value">--.-%</span>
+                        </div>
+                    </div>
+                    <div class="market-card">
+                        <div class="panel-header">TOTAL MARKET CAP</div>
+                        <div class="price-display">
+                            <span class="price-value" id="market-cap-value">$--</span>
+                        </div>
+                    </div>
+                    <div class="market-card wide">
+                        <div class="panel-header">FUNDING RATES (8H)</div>
+                        <div class="funding-rates-grid" id="funding-rates-container">
+                            <div class="funding-item">
+                                <span class="funding-symbol">BTC</span>
+                                <span class="funding-value" id="funding-btc">--</span>
+                            </div>
+                            <div class="funding-item">
+                                <span class="funding-symbol">ETH</span>
+                                <span class="funding-value" id="funding-eth">--</span>
+                            </div>
+                            <div class="funding-item">
+                                <span class="funding-symbol">SOL</span>
+                                <span class="funding-value" id="funding-sol">--</span>
+                            </div>
+                        </div>
+                        <div class="funding-legend">
+                            <span class="positive">+ Longs pay shorts</span>
+                            <span class="negative">- Shorts pay longs</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Page: Patterns -->
+            <section class="page" id="page-patterns">
+                <div class="page-header">
+                    <h2>PATTERN LEADERBOARD</h2>
+                    <div class="sort-controls">
+                        <button class="sort-btn active" data-sort="fitness_score">FITNESS</button>
+                        <button class="sort-btn" data-sort="annualized_roi_pct">ROI</button>
+                        <button class="sort-btn" data-sort="sharpe_ratio">SHARPE</button>
+                        <button class="sort-btn" data-sort="win_rate">WIN RATE</button>
+                    </div>
+                </div>
+                <div class="stats-bar" id="pattern-stats">
+                    <div class="stat-card">
+                        <div class="stat-value" id="stat-pattern-total">--</div>
+                        <div class="stat-label">TOTAL</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value green" id="stat-pattern-fitness">--</div>
+                        <div class="stat-label">AVG FITNESS</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value cyan" id="stat-pattern-sharpe">--</div>
+                        <div class="stat-label">AVG SHARPE</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value yellow" id="stat-pattern-roi">--</div>
+                        <div class="stat-label">AVG ROI</div>
+                    </div>
+                </div>
+                <div class="leaderboard-table" id="patterns-table">
+                    <div class="table-loading">Loading patterns...</div>
+                </div>
+            </section>
+
+            <!-- Page: Agents -->
+            <section class="page" id="page-agents">
+                <div class="page-header">
+                    <h2>AGENT LEADERBOARD</h2>
+                    <div class="sort-controls">
+                        <button class="sort-btn active" data-sort="fitness_score">FITNESS</button>
+                        <button class="sort-btn" data-sort="elo_rating">ELO</button>
+                        <button class="sort-btn" data-sort="annualized_roi_pct">ROI</button>
+                        <button class="sort-btn" data-sort="sharpe_ratio">SHARPE</button>
+                    </div>
+                </div>
+                <div class="stats-bar" id="agent-stats">
+                    <div class="stat-card">
+                        <div class="stat-value" id="stat-agent-active">--</div>
+                        <div class="stat-label">ACTIVE</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value green" id="stat-agent-fitness">--</div>
+                        <div class="stat-label">AVG FITNESS</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value magenta" id="stat-agent-elo">--</div>
+                        <div class="stat-label">AVG ELO</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value cyan" id="stat-agent-sharpe">--</div>
+                        <div class="stat-label">AVG SHARPE</div>
+                    </div>
+                </div>
+                <div class="distribution-row">
+                    <div class="distribution-card">
+                        <div class="panel-header">ELO DISTRIBUTION</div>
+                        <canvas id="elo-distribution" width="300" height="100"></canvas>
+                    </div>
+                    <div class="distribution-card">
+                        <div class="panel-header">FITNESS DISTRIBUTION</div>
+                        <canvas id="fitness-distribution" width="300" height="100"></canvas>
+                    </div>
+                </div>
+                <div class="leaderboard-table" id="agents-table">
+                    <div class="table-loading">Loading agents...</div>
+                </div>
+            </section>
+
+            <!-- Page: Trades -->
+            <section class="page" id="page-trades">
+                <div class="page-header">
+                    <h2>TRADE HISTORY</h2>
+                    <div class="filter-controls">
+                        <select id="filter-agent">
+                            <option value="">All Agents</option>
+                        </select>
+                        <select id="filter-asset">
+                            <option value="">All Assets</option>
+                            <option value="BTC">BTC</option>
+                            <option value="ETH">ETH</option>
+                            <option value="SOL">SOL</option>
+                        </select>
+                        <input type="number" id="filter-limit" value="100" min="10" max="500" placeholder="Limit">
+                    </div>
+                </div>
+                <div class="stats-bar" id="trade-stats">
+                    <div class="stat-card">
+                        <div class="stat-value" id="stat-trade-total">--</div>
+                        <div class="stat-label">TOTAL TRADES</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value green" id="stat-trade-pnl">--</div>
+                        <div class="stat-label">TOTAL P&L</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value cyan" id="stat-trade-winrate">--</div>
+                        <div class="stat-label">WIN RATE</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value yellow" id="stat-trade-avg">--</div>
+                        <div class="stat-label">AVG TRADE</div>
+                    </div>
+                </div>
+                <div class="leaderboard-table" id="trades-table">
+                    <div class="table-loading">Loading trades...</div>
+                </div>
+            </section>
+        </main>
+
+        <!-- Footer -->
+        <footer class="main-footer">
+            <span class="footer-text">COINSWARM v1.0 | FastAPI Backend</span>
+            <span class="footer-text" id="last-update">Last update: --:--:--</span>
+        </footer>
+    </div>
+
+    <script src="/dashboard/js/app.js"></script>
+</body>
+</html>

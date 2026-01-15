@@ -1,0 +1,4 @@
+# file: C:\Users\Admin\Documents\Fast_Swarm\Tests\Fixtures\canonical_windows.py
+# hypothesis_version: 6.148.11
+
+[168, 216, 1461, 2020, 2021, 2022, 2023, 2024, 2208, 2496, 4344, 5880, '*', ', ', '1d', '1h', 'BTC 2021 Bull', 'BTC 2022 Bear', 'BTC 2023 H1', 'BTC Full Cycle Daily', 'BTC/USDT', 'ETH 2022 Bear', 'ETH Merge Period', 'ETH/USDT', 'FTX Collapse', 'Flash Crash May 2021', 'Luna Collapse', 'btc', 'btc_2021_bull', 'btc_2022_bear', 'btc_2023_h1', 'btc_full_cycle_daily', 'eth', 'eth_2022_bear', 'eth_merge_period', 'flash_crash_may2021', 'ftx_collapse', 'luna_collapse', 'multi_2024_volatile']

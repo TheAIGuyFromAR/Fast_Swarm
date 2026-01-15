@@ -1,0 +1,28 @@
+{
+  "agent_id": "canonical-mean_reverter-333",
+  "trait_hash": "39a854debe3385f1a4953b8eb25653e98f21a1f4579ce029650233283121910e",
+  "traits": {
+    "adaptability": 0.971187776117638,
+    "breakout_preference": 0.48136797945052423,
+    "correlation_awareness": 0.4813176438155772,
+    "drawdown_sensitivity": 0.3411551372684761,
+    "entry_aggression": 0.6,
+    "exit_aggression": 0.7958911004580924,
+    "funding_rate_sensitivity": 0.38602918224030347,
+    "hold_duration_bias": 0.3531347454768303,
+    "lookback_preference": 0.882253962968031,
+    "mean_reversion": 0.95,
+    "momentum_vs_reversion": 0.05,
+    "news_reactivity": 0.049604220900671514,
+    "patience": 0.9,
+    "profit_target_greed": 0.08207474114180124,
+    "risk_tolerance": 0.5548354562432166,
+    "sentiment_contrarian": 0.85,
+    "sentiment_weight": 0.09248701735444176,
+    "stop_loss_tightness": 0.9593151345704568,
+    "trend_following": 0.25474575642713504,
+    "volatility_seeking": 0.9830619126886116,
+    "volume_sensitivity": 0.9638125767856595,
+    "win_rate_preference": 0.5377022589555183
+  }
+}

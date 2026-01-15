@@ -1,0 +1,234 @@
+"""
+Pattern Discovery Service - Priority queue-based pattern testing.
+
+This service implements the complete pattern testing flow:
+1. Priority Queue: HIGH (fast-track) → NORMAL (active) → LOW (deprioritized)
+2. Batch Backtest: Uses pre-generated window pool (15K+ windows at startup)
+3. Fitness Calculation: V2 Signed Risk formula (no EV gate)
+4. Tier Promotion: TIER 3 (untested) → TIER 2 (proven) → TIER 1 (elite)
+
+Utilities are now local to Fast_Swarm (no external path dependencies).
+"""
+
+# Import local utilities (ported from Coinswarm-1/local-utilities)
+from Fast_Swarm.local_agents.backtest.windows import get_windows_for_symbol, is_initialized
+from Fast_Swarm.utilities import (
+    PatternDiscoveryScheduler,
+    backtest_pattern_on_windows,
+    get_prioritized_patterns,
+    update_priority_after_backtest,
+)
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import select
+
+from ..Models.pattern_models import Pattern
+
+
+class PatternDiscoveryService:
+    """Service for pattern discovery and priority-based testing."""
+
+    async def run_batch_backtest(
+        self,
+        session: AsyncSession,
+        batch_size: int = 50,
+        priority_filter: str | None = None,
+    ) -> dict:
+        """
+        Run batch backtest using priority queue.
+
+        This is the main entry point that:
+        1. Gets patterns from priority queue
+        2. Runs batch backtest (random windows)
+        3. Updates fitness and priority
+        4. Promotes patterns to higher tiers
+
+        Args:
+            session: Database session
+            batch_size: Number of patterns to test
+            priority_filter: "high", "normal", "low", or None (all)
+
+        Returns:
+            Dict with backtest results
+        """
+        # Get patterns from priority queue
+        include_low = priority_filter == "low" or priority_filter is None
+        patterns = await get_prioritized_patterns(
+            session,
+            limit=batch_size,
+            include_low=include_low,
+        )
+
+        if not patterns:
+            return {
+                "patterns_tested": 0,
+                "message": "No patterns in priority queue",
+            }
+
+        import time
+        batch_start = time.time()
+        print(f"[PatternBacktest] Testing {len(patterns)} patterns across 3 assets...")
+
+        # Use pre-generated window pool (loaded at server startup)
+        assets = ["BTC", "ETH", "SOL"]
+        windows_per_asset = 10
+
+        if not is_initialized():
+            print(f"[PatternBacktest] ERROR: Window pool not initialized!")
+            return {
+                "patterns_tested": 0,
+                "error": "Window pool not initialized - restart server",
+            }
+
+        # Grab windows from the pre-generated pool (instant, no DB queries)
+        print(f"[PatternBacktest] Sampling {windows_per_asset} windows per asset from pool...")
+        windows_by_asset = {}
+        for asset in assets:
+            # Convert Window objects to dicts for backtest_pattern_on_windows
+            pool_windows = get_windows_for_symbol(asset, count=windows_per_asset)
+            if pool_windows:
+                windows_by_asset[asset] = [
+                    {"start_ts": w.start_ts, "end_ts": w.end_ts, "symbol": w.symbol, "timeframe": w.timeframe}
+                    for w in pool_windows
+                ]
+                print(f"[PatternBacktest]   {asset}: {len(pool_windows)} windows")
+            else:
+                print(f"[PatternBacktest]   {asset}: NO WINDOWS IN POOL")
+
+        if not windows_by_asset:
+            print(f"[PatternBacktest] ERROR: No windows in pool for any asset")
+            return {
+                "patterns_tested": 0,
+                "error": "No windows in pool for target assets",
+            }
+
+        total_windows = sum(len(w) for w in windows_by_asset.values())
+        print(f"[PatternBacktest] Ready: {total_windows} windows from pool")
+
+        # Run batch backtest (V3-style random windows)
+        results = {}
+        tested = 0
+
+        for idx, pattern in enumerate(patterns):
+            pid = pattern.get("pattern_id")
+            pattern_start = time.time()
+            print(f"[PatternBacktest] [{idx + 1}/{len(patterns)}] Testing {pid[:16]}...", end=" ", flush=True)
+            try:
+                # Test on multiple assets using PRE-GENERATED windows
+                # Each window already has its own timeframe from the pool
+                all_results = []
+                for asset, asset_windows in windows_by_asset.items():
+                    for window in asset_windows:
+                        window_results = await backtest_pattern_on_windows(
+                            session, pattern, [window], asset, window["timeframe"]
+                        )
+                        all_results.extend(window_results)
+
+                pattern_elapsed = time.time() - pattern_start
+                if all_results:
+                    # Aggregate results
+                    avg_fitness = sum(r.get("fitness_score", 0) for r in all_results) / len(all_results)
+                    total_trades = sum(r.get("total_trades", 0) for r in all_results)
+
+                    results[pid] = {
+                        "fitness": avg_fitness,
+                        "total_trades": total_trades,
+                        "windows_tested": len(all_results),
+                    }
+
+                    # Update priority
+                    await update_priority_after_backtest(
+                        session,
+                        pid,
+                        new_runs=(pattern.get("total_runs") or 0) + len(all_results),
+                        new_periods_tested=(pattern.get("periods_tested") or 0) + len(all_results),
+                        new_fitness=avg_fitness,
+                    )
+                    tested += 1
+                    print(f"fitness={avg_fitness:.1f}, trades={total_trades}, windows={len(all_results)} ({pattern_elapsed:.1f}s)")
+                else:
+                    print(f"NO RESULTS ({pattern_elapsed:.1f}s)")
+                    results[pid] = {"error": "No results from backtest"}
+
+            except Exception as e:
+                print(f"ERROR: {e}")
+                results[pid] = {"error": str(e)}
+
+        # Check for tier promotions
+        batch_elapsed = time.time() - batch_start
+        print(f"[PatternBacktest] Checking tier promotions...")
+        promotions = await self._check_tier_promotions(session)
+
+        print(f"[PatternBacktest] DONE: {tested}/{len(patterns)} patterns tested in {batch_elapsed:.1f}s")
+        if promotions:
+            print(f"[PatternBacktest] Tier promotions: {promotions}")
+
+        return {
+            "patterns_tested": tested,
+            "total_patterns": len(patterns),
+            "tier_promotions": promotions,
+            "results": results,
+        }
+
+    async def run_discovery_cycle(
+        self,
+        session: AsyncSession,
+    ) -> dict:
+        """
+        Run pattern discovery cycle (creates new patterns).
+
+        Uses PatternDiscoveryScheduler to:
+        1. Load chaos trades from PostgreSQL
+        2. RandomForest extracts top 20 features
+        3. LLM generates patterns
+        4. Inserts with status='untested', origin='automated_discovery'
+
+        Returns:
+            Dict with discovery results
+        """
+        scheduler = PatternDiscoveryScheduler(interval_hours=6)
+        result = await scheduler.run_discovery_cycle(session)
+
+        return result.to_dict()
+
+    async def _check_tier_promotions(self, session: AsyncSession) -> dict:
+        """
+        Check for patterns that should be promoted to higher tiers.
+
+        Tier System:
+        - TIER 3 (Untested): fitness = 0
+        - TIER 2 (Proven): fitness 40-79
+        - TIER 1 (Elite): fitness 80+
+
+        Returns:
+            Dict with promotion counts
+        """
+        # Get patterns that need tier updates
+        result = await session.exec(select(Pattern).where(Pattern.is_active == True))
+        patterns = result.all()
+
+        promotions = {"to_tier_1": 0, "to_tier_2": 0}
+
+        for pattern in patterns:
+            fitness = pattern.fitness_score or 0
+            current_tier = pattern.tier or 3
+
+            # Promote to TIER 1 (Elite)
+            if fitness >= 80 and current_tier != 1:
+                pattern.tier = 1
+                session.add(pattern)
+                promotions["to_tier_1"] += 1
+
+            # Promote to TIER 2 (Proven)
+            elif fitness >= 40 and current_tier == 3:
+                pattern.tier = 2
+                session.add(pattern)
+                promotions["to_tier_2"] += 1
+
+        await session.commit()
+        return promotions
+
+    async def _run_in_thread(self, func, *args, **kwargs):
+        """Run blocking function in thread pool."""
+        import asyncio
+
+        return await asyncio.to_thread(func, *args, **kwargs)

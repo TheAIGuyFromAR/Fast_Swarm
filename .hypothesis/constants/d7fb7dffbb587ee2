@@ -1,0 +1,4 @@
+# file: C:\Users\Admin\Documents\Fast_Swarm\Database.py
+# hypothesis_version: 6.148.11
+
+['5432', 'DATABASE_URL', 'POSTGRES_DB', 'POSTGRES_HOST', 'POSTGRES_PASSWORD', 'POSTGRES_PORT', 'POSTGRES_USER', 'SYNC_DATABASE_URL', 'coinswarm', 'coinswarm_dev_2024', 'localhost']

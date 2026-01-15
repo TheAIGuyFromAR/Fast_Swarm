@@ -1,0 +1,28 @@
+{
+  "agent_id": "canonical-volatile_hunter-666",
+  "trait_hash": "df2999e6e30b1661f7ad0bb9a01992d742bf3d246eeb730073728a29161c7a56",
+  "traits": {
+    "adaptability": 0.7,
+    "breakout_preference": 0.9,
+    "correlation_awareness": 0.09938025699844577,
+    "drawdown_sensitivity": 0.5536737425539718,
+    "entry_aggression": 0.8147597621524992,
+    "exit_aggression": 0.3854936732156333,
+    "funding_rate_sensitivity": 0.9674559330059664,
+    "hold_duration_bias": 0.9033231539802643,
+    "lookback_preference": 0.6291099598044565,
+    "mean_reversion": 0.6105126406552556,
+    "momentum_vs_reversion": 0.7121747682476842,
+    "news_reactivity": 0.9888178277721876,
+    "patience": 0.68155299240808,
+    "profit_target_greed": 0.5006266907917188,
+    "risk_tolerance": 0.85,
+    "sentiment_contrarian": 0.01676515575428217,
+    "sentiment_weight": 0.8918256877276406,
+    "stop_loss_tightness": 0.1231420937871801,
+    "trend_following": 0.9216589677068021,
+    "volatility_seeking": 0.95,
+    "volume_sensitivity": 0.8,
+    "win_rate_preference": 0.8113594841043066
+  }
+}

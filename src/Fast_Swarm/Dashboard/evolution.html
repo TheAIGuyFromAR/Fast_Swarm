@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Evolution Progress - CoinSwarm</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background: linear-gradient(135deg, #0a0a1a 0%, #1a1a2e 100%);
+            color: #e0e0e0;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container { max-width: 1400px; margin: 0 auto; }
+        h1 {
+            font-size: 2rem;
+            color: #00ff88;
+            text-shadow: 0 0 20px rgba(0,255,136,0.3);
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        h1::before { content: "◆"; }
+        .refresh-time { font-size: 0.8rem; color: #888; margin-left: auto; }
+
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-bottom: 20px; }
+
+        .card {
+            background: rgba(30, 30, 50, 0.8);
+            border: 1px solid rgba(0, 255, 136, 0.2);
+            border-radius: 12px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+        }
+        .card h2 {
+            font-size: 0.9rem;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 15px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            padding-bottom: 10px;
+        }
+
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+        .stat-label { color: #aaa; }
+        .stat-value { font-weight: 600; color: #fff; }
+        .stat-value.green { color: #00ff88; }
+        .stat-value.red { color: #ff4466; }
+        .stat-value.yellow { color: #ffcc00; }
+
+        .regime-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; }
+        .regime-card {
+            background: rgba(0,0,0,0.3);
+            border-radius: 8px;
+            padding: 15px;
+            text-align: center;
+            border: 1px solid transparent;
+            transition: all 0.3s;
+        }
+        .regime-card:hover { border-color: rgba(0,255,136,0.3); transform: translateY(-2px); }
+        .regime-name { font-size: 0.75rem; text-transform: uppercase; color: #888; margin-bottom: 8px; }
+        .regime-fitness {
+            font-size: 2rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #00ff88, #00ccff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .regime-fitness.low { background: linear-gradient(135deg, #ff4466, #ff8844); -webkit-background-clip: text; background-clip: text; }
+        .regime-fitness.mid { background: linear-gradient(135deg, #ffcc00, #ff8844); -webkit-background-clip: text; background-clip: text; }
+        .regime-meta { font-size: 0.7rem; color: #666; margin-top: 5px; }
+
+        .trade-rate {
+            display: flex;
+            align-items: baseline;
+            gap: 5px;
+        }
+        .rate-number { font-size: 2.5rem; font-weight: 700; color: #00ccff; }
+        .rate-unit { color: #888; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Evolution Progress <span class="refresh-time" id="refresh-time">Loading...</span></h1>
+
+        <div class="grid">
+            <div class="card">
+                <h2>Agents</h2>
+                <div class="stat-row">
+                    <span class="stat-label">Active</span>
+                    <span class="stat-value" id="agent-count">--</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Avg Fitness</span>
+                    <span class="stat-value" id="avg-fitness">--</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Fitness 50+</span>
+                    <span class="stat-value green" id="fit-50">--</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Specialists (50+ in regime)</span>
+                    <span class="stat-value yellow" id="specialists">--</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Win Rate</span>
+                    <span class="stat-value" id="win-rate">--</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Avg Backtests</span>
+                    <span class="stat-value" id="avg-backtests">--</span>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Trades</h2>
+                <div class="trade-rate">
+                    <span class="rate-number" id="trade-rate">--</span>
+                    <span class="rate-unit">trades/min</span>
+                </div>
+                <div class="stat-row" style="margin-top: 20px;">
+                    <span class="stat-label">Evolution Total</span>
+                    <span class="stat-value" id="evo-trades">--</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">All Time</span>
+                    <span class="stat-value" id="total-trades">--</span>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Patterns</h2>
+                <div class="stat-row">
+                    <span class="stat-label">Active</span>
+                    <span class="stat-value" id="pattern-count">--</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Avg Fitness</span>
+                    <span class="stat-value" id="pattern-fitness">--</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Tier 1 (80+)</span>
+                    <span class="stat-value green" id="pattern-t1">--</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Tier 2 (50+)</span>
+                    <span class="stat-value yellow" id="pattern-t2">--</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Regime Fitness (Canonical Periods)</h2>
+            <div class="regime-grid" id="regime-grid"></div>
+        </div>
+    </div>
+
+    <script>
+        function createRegimeCard(name, data) {
+            const fitness = data.fitness || 0;
+            const card = document.createElement('div');
+            card.className = 'regime-card';
+
+            const nameEl = document.createElement('div');
+            nameEl.className = 'regime-name';
+            nameEl.textContent = name.replace('random_', '').replace('_', ' ');
+
+            const fitnessEl = document.createElement('div');
+            fitnessEl.className = 'regime-fitness';
+            if (fitness < 30) fitnessEl.classList.add('low');
+            else if (fitness < 50) fitnessEl.classList.add('mid');
+            fitnessEl.textContent = fitness.toFixed(0);
+
+            const meta1 = document.createElement('div');
+            meta1.className = 'regime-meta';
+            meta1.textContent = (data.agents || 0) + ' agents - ' + (data.trades || 0) + ' trades';
+
+            const meta2 = document.createElement('div');
+            meta2.className = 'regime-meta';
+            meta2.textContent = 'WR: ' + ((data.win_rate || 0) * 100).toFixed(1) + '%';
+
+            card.appendChild(nameEl);
+            card.appendChild(fitnessEl);
+            card.appendChild(meta1);
+            card.appendChild(meta2);
+
+            return card;
+        }
+
+        function renderRegimes(regimes) {
+            const grid = document.getElementById('regime-grid');
+            grid.replaceChildren();
+
+            const sorted = Object.entries(regimes).sort((a, b) => (b[1].fitness || 0) - (a[1].fitness || 0));
+
+            for (const [name, data] of sorted) {
+                grid.appendChild(createRegimeCard(name, data));
+            }
+        }
+
+        async function fetchStats() {
+            try {
+                const [agentRes, patternRes] = await Promise.all([
+                    fetch('/agents/stats/average'),
+                    fetch('/patterns/stats/average')
+                ]);
+
+                const agents = await agentRes.json();
+                const patterns = await patternRes.json();
+
+                document.getElementById('agent-count').textContent = agents.active_count || '--';
+                document.getElementById('avg-fitness').textContent = (agents.avg_fitness || 0).toFixed(1);
+                document.getElementById('fit-50').textContent = agents.fitness_50_plus || '--';
+                document.getElementById('specialists').textContent = agents.specialists || '--';
+                document.getElementById('win-rate').textContent = ((agents.avg_win_rate || 0) * 100).toFixed(1) + '%';
+                document.getElementById('avg-backtests').textContent = (agents.avg_backtest_count || 0).toFixed(1);
+
+                document.getElementById('pattern-count').textContent = patterns.active_count || '--';
+                document.getElementById('pattern-fitness').textContent = (patterns.avg_fitness || 0).toFixed(1);
+                document.getElementById('pattern-t1').textContent = patterns.tier_1_count || '--';
+                document.getElementById('pattern-t2').textContent = patterns.tier_2_count || '--';
+
+                if (agents.regime_fitness) {
+                    renderRegimes(agents.regime_fitness);
+                }
+
+                document.getElementById('refresh-time').textContent = 'Updated: ' + new Date().toLocaleTimeString();
+
+            } catch (e) {
+                console.error('Fetch error:', e);
+            }
+        }
+
+        fetchStats();
+        setInterval(fetchStats, 30000);
+    </script>
+</body>
+</html>

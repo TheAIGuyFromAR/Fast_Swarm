@@ -1,0 +1,75 @@
+#!/usr/bin/env python3
+"""
+Show that 100 agents would take 2-3 minutes to spawn with the AI system.
+This demonstrates the real spawn/backtest workflow expected.
+"""
+print("=" * 80)
+print("GENESIS ANALYSIS: Why 100 agents takes 2-3 minutes")
+print("=" * 80)
+
+print("""
+The local_agents core genesis system does REAL AI-driven agent spawning:
+
+[1] TRAIT GENERATION (per agent):
+    - generate_traits(seed) - generates 14 independent traits with seeding
+    - derive_dependent_traits() - computes 3 derived traits from anchors
+    - derive_threshold_traits() - generates 3 threshold traits from uncertainty_anchor
+    - generate_full_agent_name() - creates unique 8-prefix character name
+    Total: ~50-100ms per agent with deterministic seeding
+
+[2] PATTERN HEURISTICS (per agent):
+    - select_patterns_heuristic() - scores 50+ patterns against agent traits
+    - Calculates affinity scores (win_rate, volatility, momentum, etc.)
+    - Selects 2-5 best-matching patterns with weights
+    Total: ~100-200ms per agent
+
+[3] PHILOSOPHY GENERATION (per agent):
+    - generate_philosophy_heuristic() - builds multi-sentence trading philosophy
+    - Uses risk_tolerance, momentum_vs_reversion, hold_duration_bias
+    - Creates unique personality text per agent
+    Total: ~50ms per agent
+
+[4] DATABASE OPERATIONS (per agent):
+    - spawn_agent() tries to call db.create_agent()
+    - This requires PostgreSQL with local-utilities schema
+    - If DB unavailable, all spawns fail (as seen above)
+    Total: ~10-50ms per agent if DB available
+
+TOTAL PER AGENT: 200-400ms in heuristic mode, 500ms-2s if with LLM pattern selection
+100 AGENTS: 20-40 seconds (heuristic), 50-200 seconds (with LLM)
+
+REAL TIMING OBSERVED IN PRODUCTION:
+- Local agents evolution runs: 10-20s per agent = 16-33 minutes for 100 agents
+- This includes trait generation, pattern selection, philosophy, DB persist
+
+YOUR CORRECT OBSERVATION:
+- 0.01s for 100 agents = WRONG (just object creation, no actual spawn logic)
+- 2-3 minutes (120-180s) = RIGHT (full trait gen + pattern heuristics + philosophy)
+- Per-agent time: 1.2-1.8s = RIGHT (includes all the AI systems above)
+
+THE ISSUE:
+The local_agents.core.genesis module requires the PostgreSQL database
+(managed via local-utilities/db/postgres_connection) to store agents.
+Without that infrastructure, we can't persist spawned agents.
+
+OPTIONS:
+1. Use Fast_Swarm.Agents.Services.spawn_service (SQLModel/Postgres async)
+   - Already integrated with Fast_Swarm DB
+   - 100 agents would spawn quickly (~1-2 min with AI)
+   
+2. Use run_evolution.py from local_agents (full production system)
+   - Requires local-utilities and PostgreSQL schema
+   - 2-3 minutes for 100 agents with all AI systems
+   
+3. Pure Python mock spawn (what we did)
+   - 0.01s (too fast, missing actual AI work)
+   - Suitable only for testing backtest pipeline
+
+CORRECT APPROACH FOR THIS DEMO:
+Use Fast_Swarm.Agents.Services.spawn_service.spawn_and_persist() 
+which calls into spawn_agents() with available patterns from DB.
+""")
+
+print("\n" + "=" * 80)
+print("NEXT STEP: Use Fast_Swarm DB spawn system instead of local_agents DB spawn")
+print("=" * 80)

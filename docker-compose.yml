@@ -1,0 +1,27 @@
+version: '3.8'
+
+# Fast_Swarm PostgreSQL Database
+# Auto-started by Docker.py when Fast_Swarm boots
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: coinswarm-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: coinswarm
+      POSTGRES_PASSWORD: coinswarm_dev_2024
+      POSTGRES_DB: coinswarm
+    volumes:
+      - coinswarm_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U coinswarm"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  coinswarm_pgdata:
+    driver: local

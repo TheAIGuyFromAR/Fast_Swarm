@@ -1,0 +1,4 @@
+# file: C:\Users\Admin\AppData\Roaming\Python\Python312\site-packages\sqlmodel\main.py
+# hypothesis_version: 6.148.11
+
+['CASCADE', 'IncEx', 'RESTRICT', 'SET NULL', 'SQLModel', '_T', '_TSQLModel', '__', '__abstract__', '__annotations__', '__weakref__', '_sa_', '_sa_instance_state', '_sa_registry', 'all', 'all, delete-orphan', 'back_populates', 'cascade', 'context', 'decimal_places', 'default', 'error', 'fallback', 'foreign_key', 'index', 'json', 'local_table', 'max_digits', 'max_length', 'metadata', 'none', 'nullable', 'ondelete', 'passive_deletes', 'primary_key', 'python', 'read_from_attributes', 'read_with_orm_mode', 'registry', 'sa_column', 'sa_column_args', 'sa_column_kwargs', 'sa_type', 'secondary', 'serialize_as_any', 'table', 'unique', 'warn']

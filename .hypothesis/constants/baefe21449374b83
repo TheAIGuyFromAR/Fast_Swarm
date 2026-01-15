@@ -1,0 +1,4 @@
+# file: C:\Users\Admin\Documents\Fast_Swarm\Patterns\Services\pattern_service.py
+# hypothesis_version: 6.148.11
+
+[0.0, 0.01, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 50.0, 100.0, 100, 1000, '-inf', '15m', '1d', '1h', '1m', 'LONG', 'academic', 'active', 'ai', 'archived', 'asset', 'assets_tested', 'backtest_count', 'chaos', 'cloned', 'cloned_count', 'clones', 'created_at', 'culled', 'culled_count', 'description', 'direction', 'entry_conditions', 'exit_conditions', 'fitness_score', 'generation', 'hybrid', 'indicator', 'inf', 'limit', 'max', 'max_drawdown_pct', 'min', 'name', 'number_of_runs', 'origin', 'parent_a_id', 'parent_b_id', 'parent_id', 'pattern_id', 'sharpe_ratio', 'status', 'survived', 'survivors', 'symbol', 'technical', 'tier', 'timeframe', 'timeframes_tested', 'total_roi_pct', 'total_runs', 'total_trades', 'unknown', 'untested', 'winning_trades']

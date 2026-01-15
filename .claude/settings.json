@@ -1,0 +1,83 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "Session starting for Coinswarm project.\n\nINTER-CLAUDE COORDINATION:\n1. Generate a unique session ID: Use format 'claude-YYYYMMDD-HHMM-XXXX' (XXXX = random 4 chars)\n2. Log to .claude/activity.jsonl: {\"event\":\"SESSION_START\",\"session_id\":\"...\",\"timestamp\":\"...\",\"task\":\"...\"}\n3. Append to .claude/interclaude-chat.md with your session context\n4. Check .claude/shared-todos.md for tasks left by previous sessions - adopt any relevant ones\n\nMEMORY LOADING:\n5. Query memory using mcp__memory__search_nodes with query 'Coinswarm' to load project context\n6. Check .claude/activity.jsonl for recent activity from other Claude instances\n7. Note any active sessions (START without END) and files they're editing - AVOID those files if possible\n\nProvide a brief context summary including: session ID, inherited todos, and potential conflicts."
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "CRITICAL: Context is about to be compacted and older messages will be lost.\n\nReview the conversation and extract:\n\n1. KEY DECISIONS: What was decided and WHY (the rationale)\n2. ERRORS & FIXES: What broke and HOW it was fixed\n3. ARCHITECTURAL INSIGHTS: Any patterns or learnings\n4. OPEN QUESTIONS: Unresolved issues\n5. CONTEXT FOR NEXT SESSION: What we were working on, next steps\n\nUse mcp__memory__add_observations to save these to appropriate entities.\nCreate new entities with mcp__memory__create_entities if needed.\nBe concise but capture the reasoning.\n\nThis is your last chance to save this context before it's lost."
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "Session ending.\n\nINTER-CLAUDE HANDOFF:\n1. Log to .claude/activity.jsonl: {\"event\":\"SESSION_END\",\"session_id\":\"...\",\"timestamp\":\"...\",\"summary\":\"...\"}\n2. Append to .claude/interclaude-chat.md:\n   - What was accomplished\n   - What's left to do\n   - Any warnings for the next Claude\n3. If you have incomplete todos, add them to .claude/shared-todos.md for the next session\n\nMEMORY SAVE:\n4. Use mcp__memory__add_observations to save key decisions and learnings\n5. If significant new concepts were introduced, use mcp__memory__create_entities\n\nKeep it concise - focus on what the NEXT Claude needs to know."
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "A subagent just completed. If it discovered important information:\n- Architecture findings\n- Code patterns\n- Answered a significant question\n\nCapture the key insight using mcp__memory__add_observations.\nSkip if the subagent work was routine."
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "Session fully ending (cleanup).\n\nFINAL INTER-CLAUDE SYNC:\n1. Ensure .claude/activity.jsonl has SESSION_END entry\n2. Any discoveries made should be in .claude/interclaude-chat.md\n3. Incomplete work MUST be in .claude/shared-todos.md\n\nThis is the last action before session terminates."
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "Quick focus check: Are you still working on your claimed task? Stay on scope."
+          }
+        ]
+      },
+      {
+        "matcher": "TodoWrite",
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "Todo list was just updated.\n\nSYNC TO SHARED LIST:\nCopy ALL non-trivial todos to .claude/shared-todos.md so other Claude sessions can see them.\n\nCONTINUE WORKING:\n1. Check what's in_progress - do that task\n2. When done, mark completed and pick next pending task\n3. Keep going until ALL todos are completed\n4. Only stop when genuinely blocked or all done"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "File was just edited. If this edit:\n- Is part of implementing a significant decision, note it\n- Fixes an important bug, capture the fix\n- Establishes a new pattern, remember it\n\nUse mcp__memory__add_observations if the edit is noteworthy.\nSkip for trivial edits."
+          }
+        ]
+      }
+    ]
+  }
+}

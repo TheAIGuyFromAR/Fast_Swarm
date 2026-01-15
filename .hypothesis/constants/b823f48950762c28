@@ -1,0 +1,4 @@
+# file: C:\Users\Admin\AppData\Roaming\Python\Python312\site-packages\sqlalchemy\sql\_selectable_constructors.py
+# hypothesis_version: 6.148.11
+
+['CompoundSelect[_TP]', 'Select[_TP]']

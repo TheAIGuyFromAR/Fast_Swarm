@@ -1,0 +1,4 @@
+# file: C:\Users\Admin\Documents\Fast_Swarm\local_agents\config.py
+# hypothesis_version: 6.148.11
+
+[0.01, 0.05, 0.1, 0.15, 0.3, 0.34, 0.4, 0.5, 0.6, 0.67, 0.7, 0.8, 100, 365, 512, 1024, '5432', 'POSTGRES_DB', 'POSTGRES_HOST', 'POSTGRES_PORT', 'POSTGRES_USER', 'coinswarm', 'data', 'llm', 'localhost', 'prompts', 'vllm']

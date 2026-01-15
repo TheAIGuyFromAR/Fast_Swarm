@@ -1,0 +1,78 @@
+{
+  "timestamp": "2026-01-12T17:42:23.180498",
+  "agents": {
+    "count": 391,
+    "avg_fitness": 27.53,
+    "fit_50_plus": 2,
+    "avg_backtests": 2.42,
+    "evaluated": 143,
+    "win_rate_pct": 48.699999999999996,
+    "avg_roi": 1204.71,
+    "sharpe": 0.1
+  },
+  "patterns": {
+    "count": 12624,
+    "avg_fitness": 48.29,
+    "fit_50_plus": 1424,
+    "fit_70_plus": 209,
+    "win_rate_pct": 32.300000000000004,
+    "avg_roi": -229.59,
+    "sharpe": -0.97
+  },
+  "trades": {
+    "evolution": 943244,
+    "total": 5322942
+  },
+  "regimes": {
+    "bull": {
+      "fitness": 98.42,
+      "count": 337,
+      "trades": 301
+    },
+    "recovery": {
+      "fitness": 95.85,
+      "count": 333,
+      "trades": 144
+    },
+    "blowoff": {
+      "fitness": 69.98,
+      "count": 278,
+      "trades": 24
+    },
+    "random_1d": {
+      "fitness": 64.67,
+      "count": 337,
+      "trades": 248
+    },
+    "random_1h": {
+      "fitness": 45.57,
+      "count": 340,
+      "trades": 523
+    },
+    "random_15m": {
+      "fitness": 41.6,
+      "count": 326,
+      "trades": 40
+    },
+    "random_1m": {
+      "fitness": 12.47,
+      "count": 301,
+      "trades": 37
+    },
+    "sideways": {
+      "fitness": 2.91,
+      "count": 337,
+      "trades": 124
+    },
+    "bear": {
+      "fitness": 1.72,
+      "count": 340,
+      "trades": 195
+    },
+    "crash": {
+      "fitness": 1.04,
+      "count": 314,
+      "trades": 71
+    }
+  }
+}

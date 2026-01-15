@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agent Leaderboard - Coinswarm</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #e4e4e7;
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1800px;
+            margin: 0 auto;
+        }
+
+        header {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 20px 30px;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            margin-bottom: 30px;
+        }
+
+        h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            background: linear-gradient(90deg, #60a5fa, #a78bfa);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .subtitle {
+            color: #9ca3af;
+            font-size: 1.1em;
+        }
+
+        nav {
+            margin-top: 20px;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        nav a {
+            background: rgba(96, 165, 250, 0.2);
+            color: #60a5fa;
+            padding: 10px 20px;
+            border-radius: 5px;
+            text-decoration: none;
+            border: 1px solid rgba(96, 165, 250, 0.3);
+            transition: all 0.3s;
+        }
+
+        nav a:hover {
+            background: rgba(96, 165, 250, 0.3);
+        }
+
+        nav a.active {
+            background: #60a5fa;
+            color: #1a1a2e;
+        }
+
+        .stats-bar {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .stat-card {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 20px;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #60a5fa;
+            margin-bottom: 5px;
+        }
+
+        .stat-value.green {
+            color: #34d399;
+        }
+
+        .stat-value.yellow {
+            color: #fbbf24;
+        }
+
+        .stat-label {
+            color: #9ca3af;
+            font-size: 0.85em;
+        }
+
+        .leaderboard {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            overflow: hidden;
+        }
+
+        .leaderboard-header {
+            background: linear-gradient(90deg, #3b82f6, #8b5cf6);
+            color: white;
+            padding: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        .leaderboard-title {
+            font-size: 1.5em;
+            font-weight: bold;
+        }
+
+        .sort-controls {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .sort-btn {
+            padding: 8px 16px;
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            border: 2px solid white;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+
+        .sort-btn:hover,
+        .sort-btn.active {
+            background: white;
+            color: #3b82f6;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        thead {
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        th {
+            padding: 15px;
+            text-align: left;
+            font-weight: 600;
+            color: #60a5fa;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        td {
+            padding: 15px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        tr:hover {
+            background: rgba(255, 255, 255, 0.03);
+            cursor: pointer;
+        }
+
+        .rank {
+            font-size: 1.3em;
+            font-weight: bold;
+            color: #60a5fa;
+            width: 60px;
+            text-align: center;
+        }
+
+        .rank-1 {
+            color: #FFD700;
+        }
+
+        .rank-2 {
+            color: #C0C0C0;
+        }
+
+        .rank-3 {
+            color: #CD7F32;
+        }
+
+        .agent-info {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .agent-name {
+            font-weight: 600;
+            color: #e4e4e7;
+            font-size: 1.1em;
+        }
+
+        .agent-bio {
+            font-size: 0.85em;
+            color: #9ca3af;
+            font-style: italic;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.85em;
+            font-weight: 600;
+        }
+
+        .badge-gen {
+            background: #60a5fa;
+            color: white;
+        }
+
+        .badge-active {
+            background: #34d399;
+            color: white;
+        }
+
+        .badge-inactive {
+            background: #6b7280;
+            color: white;
+        }
+
+        .metric {
+            font-weight: 600;
+            font-size: 1.05em;
+        }
+
+        .metric-positive {
+            color: #34d399;
+        }
+
+        .metric-negative {
+            color: #f87171;
+        }
+
+        .metric-neutral {
+            color: #9ca3af;
+        }
+
+        .fitness-bar {
+            width: 100px;
+            height: 10px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            overflow: hidden;
+            display: inline-block;
+            vertical-align: middle;
+            margin-left: 10px;
+        }
+
+        .fitness-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #3b82f6, #8b5cf6);
+        }
+
+        .details {
+            background: rgba(255, 255, 255, 0.02);
+            display: none;
+        }
+
+        .details.show {
+            display: table-row;
+        }
+
+        .details td {
+            padding: 20px;
+        }
+
+        .details-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 12px;
+        }
+
+        .detail-item {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 12px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .detail-label {
+            font-size: 0.7em;
+            color: #9ca3af;
+            margin-bottom: 3px;
+            text-transform: uppercase;
+        }
+
+        .detail-value {
+            font-size: 1.1em;
+            font-weight: bold;
+            color: #60a5fa;
+        }
+
+        .bio-section {
+            background: rgba(96, 165, 250, 0.1);
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 3px solid #60a5fa;
+            margin-bottom: 15px;
+        }
+
+        .bio-title {
+            color: #60a5fa;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .bio-text {
+            color: #d1d5db;
+            font-size: 0.95em;
+            line-height: 1.5;
+        }
+
+        .loading,
+        .no-data {
+            text-align: center;
+            padding: 40px;
+            color: #9ca3af;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>Agent Leaderboard</h1>
+            <p class="subtitle">FastAPI Monitoring - Top Performing Agents</p>
+            <nav>
+                <a href="patterns.html">Patterns</a>
+                <a href="agents.html" class="active">Agents</a>
+            </nav>
+        </header>
+
+        <div class="stats-bar">
+            <div class="stat-card">
+                <div class="stat-value" id="stat-active">-</div>
+                <div class="stat-label">Active Agents</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value green" id="stat-avg-fitness">-</div>
+                <div class="stat-label">Avg Fitness</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value green" id="stat-top-fitness">-</div>
+                <div class="stat-label">Top Fitness</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value yellow" id="stat-avg-roi">-</div>
+                <div class="stat-label">Avg ROI</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="stat-avg-sharpe">-</div>
+                <div class="stat-label">Avg Sharpe</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="stat-avg-win-rate">-</div>
+                <div class="stat-label">Avg Win Rate</div>
+            </div>
+        </div>
+
+        <div class="leaderboard">
+            <div class="leaderboard-header">
+                <div class="leaderboard-title">Top Agents</div>
+                <div class="sort-controls">
+                    <button class="sort-btn active" data-sort="fitness_score">Fitness</button>
+                    <button class="sort-btn" data-sort="annualized_roi_pct">ROI</button>
+                    <button class="sort-btn" data-sort="sharpe_ratio">Sharpe</button>
+                    <button class="sort-btn" data-sort="sortino_ratio">Sortino</button>
+                    <button class="sort-btn" data-sort="total_trades">Trades</button>
+                </div>
+            </div>
+
+            <div id="table-container">
+                <div class="loading">Loading agents...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:8000';
+        let agentsData = [];
+        let currentSort = 'fitness_score';
+
+        async function fetchAgents() {
+            try {
+                const [agentsRes, statsRes] = await Promise.all([
+                    fetch(`${API_URL}/agents?limit=100`),
+                    fetch(`${API_URL}/agents/stats/average`)
+                ]);
+
+                if (!agentsRes.ok || !statsRes.ok) throw new Error('API Error');
+
+                agentsData = await agentsRes.json();
+                const stats = await statsRes.json();
+
+                sortAndRender();
+                updateStats(stats);
+            } catch (error) {
+                console.error('Error fetching agents:', error);
+                document.getElementById('table-container').innerHTML =
+                    '<div class="no-data">Error loading agents. Make sure FastAPI is running on port 8000.</div>';
+            }
+        }
+
+        function sortAgents() {
+            agentsData.sort((a, b) => (b[currentSort] || 0) - (a[currentSort] || 0));
+        }
+
+        function sortAndRender() {
+            sortAgents();
+            renderTable();
+        }
+
+        function renderTable() {
+            if (agentsData.length === 0) {
+                document.getElementById('table-container').innerHTML =
+                    '<div class="no-data">No agents found.</div>';
+                return;
+            }
+
+            let html = '<table><thead><tr>';
+            html += '<th>Rank</th>';
+            html += '<th>Agent</th>';
+            html += '<th>Status</th>';
+            html += '<th>Gen</th>';
+            html += '<th>Trades</th>';
+            html += '<th>ROI %</th>';
+            html += '<th>Sharpe</th>';
+            html += '<th>Fitness</th>';
+            html += '</tr></thead><tbody>';
+
+            agentsData.forEach((agent, index) => {
+                const rank = index + 1;
+                const rankClass = rank <= 3 ? `rank-${rank}` : '';
+                const fitness = agent.fitness_score || 0;
+                const roi = agent.annualized_roi_pct || 0;
+                const sharpe = agent.sharpe_ratio || 0;
+                const sortino = agent.sortino_ratio || 0;
+                const trades = agent.total_trades || 0;
+                const winRate = agent.win_rate ? agent.win_rate * 100 : 0;
+
+                const roiClass = roi >= 15 ? 'metric-positive' : roi < 0 ? 'metric-negative' : 'metric-neutral';
+                const sharpeClass = sharpe >= 1.5 ? 'metric-positive' : sharpe < 0.5 ? 'metric-negative' : 'metric-neutral';
+
+                // Extract bio from traits if available
+                const traits = agent.traits || {};
+                const bio = traits.personality_description || 'No bio available';
+
+                html += `<tr onclick="toggleDetails('${agent.agent_id}')">`;
+                html += `<td class="rank ${rankClass}">${rank}</td>`;
+                html += `<td><div class="agent-info">`;
+                html += `<div class="agent-name">Agent #${agent.agent_id.slice(-6)}</div>`;
+                html += `<div class="agent-bio">${bio.slice(0, 60)}...</div>`;
+                html += `</div></td>`;
+                html += `<td><span class="badge ${agent.is_active ? 'badge-active' : 'badge-inactive'}">${agent.is_active ? 'ACTIVE' : 'INACTIVE'}</span></td>`;
+                html += `<td><span class="badge badge-gen">Gen ${agent.generation || 1}</span></td>`;
+                html += `<td class="metric metric-neutral">${trades}</td>`;
+                html += `<td class="metric ${roiClass}">${roi.toFixed(1)}%</td>`;
+                html += `<td class="metric ${sharpeClass}">${sharpe.toFixed(2)}</td>`;
+                html += `<td><span class="metric metric-positive">${fitness.toFixed(1)}</span>`;
+                html += `<div class="fitness-bar"><div class="fitness-fill" style="width: ${Math.min(fitness, 100)}%"></div></div></td>`;
+                html += `</tr>`;
+
+                // Details row with full bio
+                html += `<tr id="details-${agent.agent_id}" class="details">`;
+                html += `<td colspan="8">`;
+                html += `<div class="bio-section">`;
+                html += `<div class="bio-title">Agent Biography</div>`;
+                html += `<div class="bio-text">${bio}</div>`;
+                html += `</div>`;
+                html += `<div class="details-grid">`;
+                html += `<div class="detail-item"><div class="detail-label">ROI</div><div class="detail-value">${roi.toFixed(1)}%</div></div>`;
+                html += `<div class="detail-item"><div class="detail-label">Sharpe</div><div class="detail-value">${sharpe.toFixed(2)}</div></div>`;
+                html += `<div class="detail-item"><div class="detail-label">Sortino</div><div class="detail-value">${sortino.toFixed(2)}</div></div>`;
+                html += `<div class="detail-item"><div class="detail-label">Calmar</div><div class="detail-value">${(agent.calmar_ratio || 0).toFixed(2)}</div></div>`;
+                html += `<div class="detail-item"><div class="detail-label">Max DD</div><div class="detail-value">${(agent.max_drawdown_pct || 0).toFixed(1)}%</div></div>`;
+                html += `<div class="detail-item"><div class="detail-label">Win Rate</div><div class="detail-value">${winRate.toFixed(1)}%</div></div>`;
+                html += `<div class="detail-item"><div class="detail-label">Trades</div><div class="detail-value">${trades}</div></div>`;
+                html += `<div class="detail-item"><div class="detail-label">Risk Tolerance</div><div class="detail-value">${((traits.risk_tolerance || 0) * 100).toFixed(0)}%</div></div>`;
+                html += `<div class="detail-item"><div class="detail-label">Entry Aggression</div><div class="detail-value">${((traits.entry_aggression || 0) * 100).toFixed(0)}%</div></div>`;
+                html += `<div class="detail-item"><div class="detail-label">Exit Aggression</div><div class="detail-value">${((traits.exit_aggression || 0) * 100).toFixed(0)}%</div></div>`;
+                html += `</div></td></tr>`;
+            });
+
+            html += '</tbody></table>';
+            document.getElementById('table-container').innerHTML = html;
+        }
+
+        function toggleDetails(agentId) {
+            const detailsRow = document.getElementById(`details-${agentId}`);
+            if (detailsRow) detailsRow.classList.toggle('show');
+        }
+
+        function updateStats(stats) {
+            const activeCount = agentsData.filter(a => a.is_active).length;
+            document.getElementById('stat-active').textContent = activeCount;
+            document.getElementById('stat-avg-fitness').textContent = stats.avg_fitness?.toFixed(1) || '-';
+            document.getElementById('stat-top-fitness').textContent = stats.max_fitness?.toFixed(1) || '-';
+            document.getElementById('stat-avg-roi').textContent = stats.avg_roi ? stats.avg_roi.toFixed(1) + '%' : '-';
+            document.getElementById('stat-avg-sharpe').textContent = stats.avg_sharpe?.toFixed(2) || '-';
+            document.getElementById('stat-avg-win-rate').textContent = stats.avg_win_rate ? (stats.avg_win_rate * 100).toFixed(1) + '%' : '-';
+        }
+
+        // Sort button handlers
+        document.querySelectorAll('.sort-btn').forEach(btn => {
+            btn.addEventListener('click', function () {
+                document.querySelectorAll('.sort-btn').forEach(b => b.classList.remove('active'));
+                this.classList.add('active');
+                currentSort = this.dataset.sort;
+                sortAndRender();
+            });
+        });
+
+        // Fetch on load
+        fetchAgents();
+
+        // Auto-refresh every 30 seconds
+        setInterval(fetchAgents, 30000);
+    </script>
+</body>
+
+</html>

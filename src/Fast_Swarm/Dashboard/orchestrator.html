@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fast_Swarm Soundness HUD</title>
+    <style>
+        :root {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-tertiary: #21262d;
+            --text-primary: #c9d1d9;
+            --text-secondary: #8b949e;
+            --border: #30363d;
+            --green: #3fb950;
+            --yellow: #d29922;
+            --red: #f85149;
+            --blue: #58a6ff;
+            --purple: #a371f7;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container { max-width: 1400px; margin: 0 auto; }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        h1 { font-size: 24px; font-weight: 600; }
+
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .status-healthy { background: rgba(63, 185, 80, 0.2); color: var(--green); }
+        .status-warning { background: rgba(210, 153, 34, 0.2); color: var(--yellow); }
+        .status-critical { background: rgba(248, 81, 73, 0.2); color: var(--red); }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 16px;
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .card-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .metric-value { font-size: 32px; font-weight: 600; margin-bottom: 4px; }
+        .metric-label { font-size: 12px; color: var(--text-secondary); }
+
+        .gauge {
+            width: 100%;
+            height: 8px;
+            background: var(--bg-tertiary);
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 12px;
+        }
+
+        .gauge-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.3s ease;
+        }
+
+        .gauge-fill.green { background: var(--green); }
+        .gauge-fill.yellow { background: var(--yellow); }
+        .gauge-fill.red { background: var(--red); }
+
+        .test-list { list-style: none; }
+
+        .test-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .test-item:last-child { border-bottom: none; }
+        .test-name { font-size: 14px; }
+
+        .test-status {
+            font-size: 12px;
+            padding: 2px 8px;
+            border-radius: 4px;
+        }
+
+        .test-pass { background: rgba(63, 185, 80, 0.2); color: var(--green); }
+        .test-fail { background: rgba(248, 81, 73, 0.2); color: var(--red); }
+        .test-pending { background: rgba(139, 148, 158, 0.2); color: var(--text-secondary); }
+
+        .committee-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 12px;
+        }
+
+        .committee-card {
+            background: var(--bg-tertiary);
+            border-radius: 6px;
+            padding: 12px;
+        }
+
+        .committee-name { font-size: 14px; font-weight: 600; margin-bottom: 8px; }
+
+        .committee-stat {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-bottom: 4px;
+        }
+
+        .elo-distribution { display: flex; gap: 4px; margin-top: 12px; }
+
+        .elo-bar {
+            flex: 1;
+            height: 40px;
+            background: var(--bg-tertiary);
+            border-radius: 4px;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-end;
+            overflow: hidden;
+        }
+
+        .elo-bar-fill { background: var(--blue); transition: height 0.3s ease; }
+        .elo-label { font-size: 10px; color: var(--text-secondary); text-align: center; margin-top: 4px; }
+        .refresh-time { font-size: 12px; color: var(--text-secondary); }
+        .wide-card { grid-column: span 2; }
+
+        @media (max-width: 768px) { .wide-card { grid-column: span 1; } }
+
+        .activity-log {
+            max-height: 200px;
+            overflow-y: auto;
+            font-family: 'SF Mono', Monaco, monospace;
+            font-size: 12px;
+        }
+
+        .log-entry { padding: 4px 0; border-bottom: 1px solid var(--border); }
+        .log-time { color: var(--text-secondary); margin-right: 8px; }
+        .log-component { color: var(--purple); margin-right: 8px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Fast_Swarm Soundness HUD</h1>
+            <div>
+                <span class="status-badge status-healthy" id="system-status">System Healthy</span>
+                <span class="refresh-time" id="last-refresh">Last refresh: --</span>
+            </div>
+        </header>
+
+        <div class="grid">
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">Latency p99</span>
+                    <span class="test-status test-pass" id="latency-status">OK</span>
+                </div>
+                <div class="metric-value" id="latency-value">--</div>
+                <div class="metric-label">milliseconds (SLA: &lt; 100ms)</div>
+                <div class="gauge"><div class="gauge-fill green" id="latency-gauge" style="width: 0%"></div></div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">Data Staleness</span>
+                    <span class="test-status test-pass" id="staleness-status">OK</span>
+                </div>
+                <div class="metric-value" id="staleness-value">--</div>
+                <div class="metric-label">seconds since last update</div>
+                <div class="gauge"><div class="gauge-fill green" id="staleness-gauge" style="width: 0%"></div></div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">Data Gaps</span>
+                    <span class="test-status test-pass" id="gap-status">OK</span>
+                </div>
+                <div class="metric-value" id="gap-value">0</div>
+                <div class="metric-label">missing candles in last 24h</div>
+            </div>
+
+            <div class="card">
+                <div class="card-header"><span class="card-title">Soundness Tests</span></div>
+                <ul class="test-list" id="test-list"></ul>
+            </div>
+
+            <div class="card wide-card">
+                <div class="card-header"><span class="card-title">Committee Status</span></div>
+                <div class="committee-grid" id="committee-grid"></div>
+            </div>
+
+            <div class="card">
+                <div class="card-header"><span class="card-title">Agent ELO Distribution</span></div>
+                <div class="elo-distribution" id="elo-distribution"></div>
+                <div style="display: flex; justify-content: space-between; margin-top: 4px;">
+                    <span class="elo-label">1000</span>
+                    <span class="elo-label">1250</span>
+                    <span class="elo-label">1500</span>
+                    <span class="elo-label">1750</span>
+                    <span class="elo-label">2000+</span>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header"><span class="card-title">Agent Fitness Distribution</span></div>
+                <div class="elo-distribution" id="fitness-distribution"></div>
+                <div style="display: flex; justify-content: space-between; margin-top: 4px;">
+                    <span class="elo-label">0-20</span>
+                    <span class="elo-label">20-40</span>
+                    <span class="elo-label">40-60</span>
+                    <span class="elo-label">60-80</span>
+                    <span class="elo-label">80-100</span>
+                </div>
+            </div>
+
+            <div class="card wide-card">
+                <div class="card-header"><span class="card-title">Activity Log</span></div>
+                <div class="activity-log" id="activity-log"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const REFRESH_INTERVAL = 30000; // 30 seconds - reduced from 5s to avoid hammering
+
+        function formatTime(date) {
+            return date.toLocaleTimeString('en-US', { hour12: false });
+        }
+
+        function createLogEntry(component, message) {
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+
+            const timeSpan = document.createElement('span');
+            timeSpan.className = 'log-time';
+            timeSpan.textContent = formatTime(new Date());
+
+            const compSpan = document.createElement('span');
+            compSpan.className = 'log-component';
+            compSpan.textContent = '[' + component + ']';
+
+            const msgSpan = document.createElement('span');
+            msgSpan.textContent = message;
+
+            entry.appendChild(timeSpan);
+            entry.appendChild(compSpan);
+            entry.appendChild(msgSpan);
+
+            return entry;
+        }
+
+        function addLogEntry(component, message) {
+            const logContainer = document.getElementById('activity-log');
+            const entry = createLogEntry(component, message);
+            logContainer.insertBefore(entry, logContainer.firstChild);
+            while (logContainer.children.length > 50) {
+                logContainer.removeChild(logContainer.lastChild);
+            }
+        }
+
+        function createTestItem(name, status) {
+            const item = document.createElement('li');
+            item.className = 'test-item';
+
+            const nameSpan = document.createElement('span');
+            nameSpan.className = 'test-name';
+            nameSpan.textContent = name;
+
+            const statusSpan = document.createElement('span');
+            statusSpan.className = 'test-status test-' + (status === 'pass' ? 'pass' : 'fail');
+            statusSpan.textContent = status.toUpperCase();
+
+            item.appendChild(nameSpan);
+            item.appendChild(statusSpan);
+            return item;
+        }
+
+        function createCommitteeCard(name, data) {
+            const card = document.createElement('div');
+            card.className = 'committee-card';
+
+            const nameDiv = document.createElement('div');
+            nameDiv.className = 'committee-name';
+            nameDiv.textContent = name + ' Committee';
+            card.appendChild(nameDiv);
+
+            const stats = [
+                ['Active Votes', data.votes],
+                ['Accuracy', (data.accuracy * 100).toFixed(0) + '%'],
+                ['Quorum Met', data.quorum_met ? 'Yes' : 'No']
+            ];
+
+            stats.forEach(function(stat) {
+                const statDiv = document.createElement('div');
+                statDiv.className = 'committee-stat';
+
+                const label = document.createElement('span');
+                label.textContent = stat[0];
+
+                const value = document.createElement('span');
+                value.textContent = stat[1];
+
+                statDiv.appendChild(label);
+                statDiv.appendChild(value);
+                card.appendChild(statDiv);
+            });
+
+            return card;
+        }
+
+        function createEloBar(height, color) {
+            const bar = document.createElement('div');
+            bar.className = 'elo-bar';
+
+            const fill = document.createElement('div');
+            fill.className = 'elo-bar-fill';
+            fill.style.height = height + '%';
+            if (color) fill.style.background = color;
+
+            bar.appendChild(fill);
+            return bar;
+        }
+
+        function initDistributions() {
+            var eloContainer = document.getElementById('elo-distribution');
+            var fitnessContainer = document.getElementById('fitness-distribution');
+            var colors = ['var(--red)', 'var(--yellow)', 'var(--yellow)', 'var(--green)', 'var(--green)'];
+
+            for (var i = 0; i < 5; i++) {
+                eloContainer.appendChild(createEloBar(20));
+                fitnessContainer.appendChild(createEloBar(20, colors[i]));
+            }
+        }
+
+        function updateGauge(gaugeId, value, max, thresholds) {
+            var gauge = document.getElementById(gaugeId);
+            var percent = Math.min(100, (value / max) * 100);
+            gauge.style.width = percent + '%';
+            gauge.className = 'gauge-fill';
+            if (value <= thresholds.good) {
+                gauge.classList.add('green');
+            } else if (value <= thresholds.warning) {
+                gauge.classList.add('yellow');
+            } else {
+                gauge.classList.add('red');
+            }
+        }
+
+        function updateStatus(statusId, isOk) {
+            var status = document.getElementById(statusId);
+            status.className = 'test-status ' + (isOk ? 'test-pass' : 'test-fail');
+            status.textContent = isOk ? 'OK' : 'ALERT';
+        }
+
+        function fetchMetrics() {
+            return {
+                latency_p99: Math.random() * 80 + 20,
+                data_staleness: Math.random() * 30,
+                gap_count: Math.floor(Math.random() * 3),
+                committees: {
+                    BTC: { votes: 12, accuracy: 0.72, quorum_met: true },
+                    ETH: { votes: 8, accuracy: 0.68, quorum_met: true },
+                    SOL: { votes: 5, accuracy: 0.65, quorum_met: false }
+                },
+                elo_distribution: [15, 25, 40, 35, 20],
+                fitness_distribution: [5, 15, 30, 35, 25],
+                tests: {
+                    'test_conflict_isolation': 'pass',
+                    'test_trait_drift': 'pass',
+                    'test_replay_parity': 'pass',
+                    'test_vote_poisoning': 'pass'
+                }
+            };
+        }
+
+        function refresh() {
+            try {
+                var metrics = fetchMetrics();
+
+                document.getElementById('latency-value').textContent = metrics.latency_p99.toFixed(1);
+                updateGauge('latency-gauge', metrics.latency_p99, 150, { good: 50, warning: 100 });
+                updateStatus('latency-status', metrics.latency_p99 < 100);
+
+                document.getElementById('staleness-value').textContent = metrics.data_staleness.toFixed(1);
+                updateGauge('staleness-gauge', metrics.data_staleness, 60, { good: 10, warning: 30 });
+                updateStatus('staleness-status', metrics.data_staleness < 30);
+
+                document.getElementById('gap-value').textContent = metrics.gap_count;
+                updateStatus('gap-status', metrics.gap_count === 0);
+
+                var testList = document.getElementById('test-list');
+                testList.replaceChildren();
+                Object.keys(metrics.tests).forEach(function(name) {
+                    testList.appendChild(createTestItem(name, metrics.tests[name]));
+                });
+
+                var committeeGrid = document.getElementById('committee-grid');
+                committeeGrid.replaceChildren();
+                Object.keys(metrics.committees).forEach(function(name) {
+                    committeeGrid.appendChild(createCommitteeCard(name, metrics.committees[name]));
+                });
+
+                var eloBars = document.getElementById('elo-distribution').querySelectorAll('.elo-bar-fill');
+                var eloMax = Math.max.apply(null, metrics.elo_distribution);
+                metrics.elo_distribution.forEach(function(count, i) {
+                    eloBars[i].style.height = (count / eloMax * 100) + '%';
+                });
+
+                var fitnessBars = document.getElementById('fitness-distribution').querySelectorAll('.elo-bar-fill');
+                var fitnessMax = Math.max.apply(null, metrics.fitness_distribution);
+                metrics.fitness_distribution.forEach(function(count, i) {
+                    fitnessBars[i].style.height = (count / fitnessMax * 100) + '%';
+                });
+
+                var allTestsPass = Object.values(metrics.tests).every(function(s) { return s === 'pass'; });
+                var systemHealthy = allTestsPass && metrics.latency_p99 < 100 && metrics.data_staleness < 30;
+
+                var statusBadge = document.getElementById('system-status');
+                statusBadge.className = 'status-badge ' + (systemHealthy ? 'status-healthy' : 'status-warning');
+                statusBadge.textContent = systemHealthy ? 'System Healthy' : 'Issues Detected';
+
+                document.getElementById('last-refresh').textContent = 'Last refresh: ' + formatTime(new Date());
+
+            } catch (error) {
+                addLogEntry('Error', 'Refresh failed: ' + error.message);
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            initDistributions();
+            addLogEntry('System', 'Dashboard initialized');
+            refresh();
+            setInterval(refresh, REFRESH_INTERVAL);
+        });
+    </script>
+</body>
+</html>

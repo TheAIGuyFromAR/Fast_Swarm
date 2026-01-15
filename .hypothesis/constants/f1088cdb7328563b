@@ -1,0 +1,4 @@
+# file: C:\Users\Admin\Documents\Fast_Swarm\Tests\Soundness\Foundations\..\..\Fixtures\__init__.py
+# hypothesis_version: 6.148.11
+
+['AgentFactory', 'CANONICAL_AGENTS', 'CANONICAL_PATTERNS', 'CANONICAL_WINDOWS', 'PatternFactory', 'TradeFactory', 'get_agent', 'get_pattern', 'get_window']
