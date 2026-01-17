@@ -6,7 +6,6 @@ Updates agent stats (fitness, sharpe, etc.) in the database.
 All data comes from PostgreSQL enhanced_candles table (5.2M+ rows).
 """
 
-import random
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -20,7 +19,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "local_agent
 from Fast_Swarm.local_agents.backtest.data import OHLCVLoader, preload_candles_for_windows
 from Fast_Swarm.local_agents.backtest.engine import BacktestConfig, LocalBacktestEngine
 from Fast_Swarm.local_agents.core.canonical_periods import (
-    REGIMES,
     get_canonical_periods_for_backtesting,
 )
 from Fast_Swarm.local_agents.core.state import AgentRecord
@@ -105,7 +103,7 @@ class AgentBacktestService:
         Returns:
             List of window dicts with asset/timeframe/start_ts/end_ts/regime
         """
-        from Fast_Swarm.local_agents.backtest.windows import get_windows, is_initialized, get_pool_stats
+        from Fast_Swarm.local_agents.backtest.windows import get_pool_stats, get_windows, is_initialized
 
         count = count or self.WINDOWS_PER_BACKTEST
 

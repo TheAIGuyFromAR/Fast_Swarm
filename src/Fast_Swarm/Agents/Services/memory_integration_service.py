@@ -14,14 +14,12 @@ Memory Types Created from Backtests:
 """
 
 import logging
-from datetime import datetime
 from typing import Any
 
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from ..Models.memory_models import MemoryType
 from .memory_service import (
-    REVIEW_TRADE_COUNT,
     create_memory,
     get_agent_memories,
     get_weak_memories,

@@ -20,7 +20,6 @@ from sqlalchemy import Numeric
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Column, Field, SQLModel
 
-
 # =============================================================================
 # Enums
 # =============================================================================

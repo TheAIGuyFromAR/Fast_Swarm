@@ -3,7 +3,7 @@ import json
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse, Response
+from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...Database import get_session
@@ -42,7 +42,7 @@ async def get_latest_wisdom(limit: int = 5, session: AsyncSession = Depends(get_
 async def get_agent_memories(
     agent_id: str,
     limit: int = 50,
-    memory_type: Optional[str] = None,
+    memory_type: str | None = None,
     session: AsyncSession = Depends(get_session),
 ):
     """
@@ -443,6 +443,7 @@ async def event_stream():
     """
     async def generate():
         import math
+
         from ...Dependencies import stream_manager
 
         while True:

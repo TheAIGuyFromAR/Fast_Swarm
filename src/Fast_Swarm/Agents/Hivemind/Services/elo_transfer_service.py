@@ -31,10 +31,8 @@ from ..Models.coach_models import (
     Coach,
     ELOTransfer,
     HivemindVote,
-    TradeLeg,
     TradeLegType,
 )
-
 
 # =============================================================================
 # Data Classes for Transfer Calculations
@@ -453,7 +451,7 @@ async def apply_death_elo(
         to_entity_type="system",
         to_entity_id="void",
         amount=Decimal(str(remaining_elo)),
-        reason="coach_death_at_{:.0f}_elo".format(remaining_elo),
+        reason=f"coach_death_at_{remaining_elo:.0f}_elo",
     )
 
     session.add(transfer)
@@ -480,7 +478,7 @@ async def apply_clone_bonus(
         to_entity_type="coach",
         to_entity_id=child_coach_id,
         amount=Decimal(str(clone_elo)),
-        reason="clone_from_{}".format(parent_coach_id),
+        reason=f"clone_from_{parent_coach_id}",
     )
 
     session.add(transfer)

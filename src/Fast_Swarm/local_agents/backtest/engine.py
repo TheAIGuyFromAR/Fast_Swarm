@@ -600,8 +600,9 @@ class LocalBacktestEngine:
 
         if len(candles_df) < config.min_candles_warmup:
             # Log insufficient data for debugging (helps diagnose 0-trade patterns)
+            cache_hit = cache_key in self.preloaded_candles if self.preloaded_candles else False
             if len(candles_df) == 0:
-                print(f"  [Engine] {asset}/{timeframe}: No candles loaded")
+                print(f"  [Engine] {asset}/{timeframe}: No candles loaded (cache={'HIT' if cache_hit else 'MISS'}, ts={start_ts}-{end_ts})")
             else:
                 print(f"  [Engine] {asset}/{timeframe}: Only {len(candles_df)} candles (need {config.min_candles_warmup})")
             return []

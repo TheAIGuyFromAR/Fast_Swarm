@@ -55,9 +55,8 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
 
     async_session_maker = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
-    async with async_session_maker() as session:
-        async with session.begin():
-            yield session
+    async with async_session_maker() as session, session.begin():
+        yield session
             # Rollback happens automatically when context exits
 
     await engine.dispose()

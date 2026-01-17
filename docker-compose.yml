@@ -16,11 +16,34 @@ services:
       POSTGRES_DB: coinswarm
     volumes:
       - G:/docker-data/postgres:/var/lib/postgresql/data
+    # Tuned for 128GB RAM system with high concurrency
+    command:
+      - "postgres"
+      - "-c"
+      - "shared_buffers=8GB"
+      - "-c"
+      - "effective_cache_size=24GB"
+      - "-c"
+      - "work_mem=256MB"
+      - "-c"
+      - "maintenance_work_mem=2GB"
+      - "-c"
+      - "max_connections=200"
+      - "-c"
+      - "max_locks_per_transaction=256"
+      - "-c"
+      - "max_parallel_workers_per_gather=4"
+      - "-c"
+      - "max_parallel_workers=8"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U coinswarm"]
       interval: 5s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 32G
 
 volumes:
   coinswarm_pgdata:

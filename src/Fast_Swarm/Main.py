@@ -26,10 +26,10 @@ OTEL_ENABLED = os.getenv("OTEL_ENABLED", "0") == "1"
 if OTEL_ENABLED:
     try:
         from opentelemetry import trace
+        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+        from opentelemetry.sdk.resources import Resource
         from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
-        from opentelemetry.sdk.resources import Resource
-        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
         # Create tracer provider with service name
         resource = Resource.create({"service.name": "fast-swarm"})
@@ -83,7 +83,6 @@ from Fast_Swarm.System.Routers import system_router
 from Fast_Swarm.System.Services.orchestrator import get_orchestrator
 from Fast_Swarm.Tests.Router import router as test_runner_router
 from Fast_Swarm.Trades.Routers import trade_router as trades_router
-
 
 # =============================================================================
 # REMOVED: Separate concurrent loops (evolution_loop, pattern_discovery_loop,

@@ -22,10 +22,9 @@ This prevents:
 """
 
 import asyncio
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import Optional
 
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -45,7 +44,7 @@ class PipelinePhase(Enum):
 class PipelineState:
     """Current state of the orchestrator pipeline."""
     phase: PipelinePhase = PipelinePhase.IDLE
-    started_at: Optional[datetime] = None
+    started_at: datetime | None = None
 
     # Current batch tracking
     windows_loaded: int = 0
@@ -56,10 +55,10 @@ class PipelineState:
 
     # Cycle tracking
     cycles_completed: int = 0
-    last_cycle_at: Optional[datetime] = None
+    last_cycle_at: datetime | None = None
 
     # Error tracking
-    last_error: Optional[str] = None
+    last_error: str | None = None
     consecutive_errors: int = 0
 
 
@@ -79,14 +78,14 @@ class BacktestOrchestrator:
     AGENTS_PER_BATCH = 100  # Agents to test per window
     WINDOWS_PER_BATCH = 1  # Windows to load per batch (1 = test one at a time)
     WINDOWS_BEFORE_EVOLUTION = 50  # Test this many windows before evolution/discovery
-    PARALLEL_TESTS = 10  # Concurrent pattern/agent tests (tune based on CPU cores)
+    PARALLEL_TESTS = 8  # Tuned for 128GB system with PostgreSQL memory fix
     COOLDOWN_SECONDS = 60  # Pause between cycles
     MAX_CONSECUTIVE_ERRORS = 3  # Stop after this many errors
 
     def __init__(self):
         self.state = PipelineState()
         self._running = False
-        self._task: Optional[asyncio.Task] = None
+        self._task: asyncio.Task | None = None
 
         # Cached data (download once, use many times)
         self._current_windows: list = []
@@ -209,10 +208,8 @@ class BacktestOrchestrator:
         self.state.phase = PipelinePhase.LOADING_WINDOWS
         print("[Orchestrator] Phase 1: Loading windows from pool...")
 
-        from Fast_Swarm.local_agents.backtest.windows import (
-            get_windows, is_initialized, get_pool_stats
-        )
         from Fast_Swarm.local_agents.backtest.data import LazyCandleCache
+        from Fast_Swarm.local_agents.backtest.windows import get_pool_stats, get_windows, is_initialized
 
         # Check pool is initialized
         if not is_initialized():
@@ -251,6 +248,7 @@ class BacktestOrchestrator:
         print("[Orchestrator] Phase 2: Testing patterns...")
 
         from sqlmodel import select
+
         from Fast_Swarm.Patterns.Models.pattern_models import Pattern
 
         # Get patterns that need testing (priority queue)
@@ -303,6 +301,7 @@ class BacktestOrchestrator:
         print("[Orchestrator] Phase 3: Testing agents...")
 
         from sqlmodel import select
+
         from Fast_Swarm.Agents.Models.agent_models import Agent
 
         # Get agents that need testing
@@ -393,7 +392,7 @@ class BacktestOrchestrator:
 
 
 # Global singleton
-_orchestrator: Optional[BacktestOrchestrator] = None
+_orchestrator: BacktestOrchestrator | None = None
 
 
 def get_orchestrator() -> BacktestOrchestrator:

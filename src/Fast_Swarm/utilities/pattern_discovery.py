@@ -360,7 +360,7 @@ class PatternDiscoveryScheduler:
 
         indicator_cols = list(indicator_cols_set)[:30]
         print(f"[PatternDiscovery] Generated {len(winners)} winners, {len(losers)} losers from {len(raw_trades)} base trades")
-        print(f"[PatternDiscovery] Trade types: chaos, best_exit, worst_exit, perfect")
+        print("[PatternDiscovery] Trade types: chaos, best_exit, worst_exit, perfect")
         print(f"[PatternDiscovery] Extracted {len(indicator_cols)} indicator columns")
 
         return winners, losers, indicator_cols

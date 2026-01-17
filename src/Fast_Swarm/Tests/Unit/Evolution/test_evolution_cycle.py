@@ -5,7 +5,6 @@ Source of truth: Master_plan.md (Evolution Cycle)
 4-Phase cycle: SPAWN → BACKTEST → SELECT → REPRODUCE
 """
 
-import pytest
 
 from Fast_Swarm.Agents.Services.evolution_service import (
     AgentEvolutionService,

@@ -6,6 +6,7 @@ Patterns define entry/exit conditions, have fitness scores, and exist in tiers.
 """
 
 import pytest
+
 from Fast_Swarm.Patterns.Services.pattern_service import (
     VALID_ORIGINS,
     VALID_TIERS,

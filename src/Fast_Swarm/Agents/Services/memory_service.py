@@ -119,7 +119,7 @@ async def get_memory_by_id(
     """Fetch a specific memory by ID."""
     statement = select(AgentMemory).where(AgentMemory.memory_id == memory_id)
     if not include_deleted:
-        statement = statement.where(AgentMemory.deleted == False)
+        statement = statement.where(AgentMemory.deleted.is_(False))
 
     result = await session.execute(statement)
     return result.scalars().first()
@@ -153,7 +153,7 @@ async def get_agent_memories(
         statement = statement.where(AgentMemory.memory_type == memory_type.value)
 
     if not include_deleted:
-        statement = statement.where(AgentMemory.deleted == False)
+        statement = statement.where(AgentMemory.deleted.is_(False))
 
     statement = statement.order_by(AgentMemory.created_at.desc())
     statement = statement.offset(offset).limit(limit)
@@ -380,7 +380,7 @@ async def get_weak_memories(
     statement = (
         select(AgentMemory)
         .where(AgentMemory.agent_id == agent_id)
-        .where(AgentMemory.deleted == False)
+        .where(AgentMemory.deleted.is_(False))
         .where(AgentMemory.weight < threshold)
         .order_by(AgentMemory.weight.asc())
     )

@@ -11,6 +11,9 @@ Utilities are now local to Fast_Swarm (no external path dependencies).
 """
 
 # Import local utilities (ported from Coinswarm-1/local-utilities)
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import select
+
 from Fast_Swarm.local_agents.backtest.windows import get_windows_for_symbol, is_initialized
 from Fast_Swarm.utilities import (
     PatternDiscoveryScheduler,
@@ -18,8 +21,6 @@ from Fast_Swarm.utilities import (
     get_prioritized_patterns,
     update_priority_after_backtest,
 )
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import select
 
 from ..Models.pattern_models import Pattern
 
@@ -73,7 +74,7 @@ class PatternDiscoveryService:
         windows_per_asset = 10
 
         if not is_initialized():
-            print(f"[PatternBacktest] ERROR: Window pool not initialized!")
+            print("[PatternBacktest] ERROR: Window pool not initialized!")
             return {
                 "patterns_tested": 0,
                 "error": "Window pool not initialized - restart server",
@@ -95,7 +96,7 @@ class PatternDiscoveryService:
                 print(f"[PatternBacktest]   {asset}: NO WINDOWS IN POOL")
 
         if not windows_by_asset:
-            print(f"[PatternBacktest] ERROR: No windows in pool for any asset")
+            print("[PatternBacktest] ERROR: No windows in pool for any asset")
             return {
                 "patterns_tested": 0,
                 "error": "No windows in pool for target assets",
@@ -155,7 +156,7 @@ class PatternDiscoveryService:
 
         # Check for tier promotions
         batch_elapsed = time.time() - batch_start
-        print(f"[PatternBacktest] Checking tier promotions...")
+        print("[PatternBacktest] Checking tier promotions...")
         promotions = await self._check_tier_promotions(session)
 
         print(f"[PatternBacktest] DONE: {tested}/{len(patterns)} patterns tested in {batch_elapsed:.1f}s")

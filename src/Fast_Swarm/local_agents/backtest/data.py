@@ -59,7 +59,7 @@ class LazyCandleCache:
 
     def __init__(self, windows: list = None, loader: "OHLCVLoader" = None):
         self._loader = loader or OHLCVLoader()
-        self._cache: dict[str, "pd.DataFrame"] = {}
+        self._cache: dict[str, pd.DataFrame] = {}
         self._ranges: dict[tuple, dict] = {}
 
         # Precompute ranges from windows (but don't load data yet)
@@ -409,6 +409,8 @@ class OHLCVLoader:
             columns = result.keys()
 
         if not rows:
+            # Debug: log why no data found
+            print(f"    [Loader] No data for {asset}/{timeframe} ts={start_ts}-{end_ts}")
             return pd.DataFrame()
 
         # Convert to DataFrame
