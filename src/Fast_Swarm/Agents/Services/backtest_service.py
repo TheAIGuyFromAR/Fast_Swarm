@@ -798,6 +798,7 @@ class AgentBacktestService:
 
         agent_start = time.time()
         aid = agent.agent_id
+        aname = agent.name or aid[:8]  # Use name if available, else short ID
 
         # Extract agent's patterns using hydrate-once pattern:
         # - Embedded patterns (have entry_conditions) → use directly, no DB query
@@ -845,7 +846,7 @@ class AgentBacktestService:
             patterns_were_hydrated = len(fetched_patterns) > 0
             if patterns_were_hydrated:
                 agent.assigned_patterns = {"base": agent_patterns}
-                print(f"[AgentTest] {aid[:8]}: Hydrated {len(fetched_patterns)} pattern refs → embedded")
+                print(f"[AgentTest] {aname}: Hydrated {len(fetched_patterns)} pattern refs → embedded")
 
         if not agent_patterns:
             print(f"[AgentTest] {aid[:8]}: No valid patterns, skipping")
