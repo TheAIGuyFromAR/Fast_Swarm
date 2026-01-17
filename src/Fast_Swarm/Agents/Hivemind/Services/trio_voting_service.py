@@ -16,7 +16,7 @@ Flow:
 
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -553,7 +553,7 @@ async def close_trade_leg(
     leg.close_candle_idx = candle_idx
     leg.pnl_pct = Decimal(str(pnl_pct))
     leg.is_closed = True
-    leg.closed_at = datetime.utcnow()
+    leg.closed_at = datetime.now(UTC)
 
     session.add(leg)
     await session.commit()

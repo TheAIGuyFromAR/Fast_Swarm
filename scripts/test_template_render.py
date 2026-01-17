@@ -3,11 +3,11 @@
 
 from pathlib import Path
 
-from jinja2 import Environment, FileSystemLoader
+from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 PROMPTS_DIR = Path(__file__).parent.parent / "local_agents" / "prompts"
 
-env = Environment(loader=FileSystemLoader(str(PROMPTS_DIR)))
+env = Environment(loader=FileSystemLoader(str(PROMPTS_DIR)), autoescape=select_autoescape())
 template = env.get_template("ai_zone_decision.j2")
 
 # Test render

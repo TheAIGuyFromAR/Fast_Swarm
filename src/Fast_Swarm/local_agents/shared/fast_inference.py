@@ -183,13 +183,13 @@ class FastDecisionEngine:
         """Create cache key from request."""
         # Round values to reduce cache misses from floating point variance
         key = f"{req.confidence:.2f}|{req.rsi:.0f}|{req.macd:.1f}|{req.risk_tolerance:.1f}|{req.entry_aggression:.1f}|{req.recent_win_rate:.1f}"
-        return hashlib.md5(key.encode()).hexdigest()[:12]
+        return hashlib.md5(key.encode(), usedforsecurity=False).hexdigest()[:12]
 
     def is_available(self) -> bool:
         """Check if vLLM server is running."""
         try:
             req = urllib.request.Request(f"{self.base_url}/health")
-            with urllib.request.urlopen(req, timeout=2) as response:
+            with urllib.request.urlopen(req, timeout=2) as response:  # nosec B310 - trusted localhost URL
                 return response.status == 200
         except Exception:
             return False
@@ -270,7 +270,7 @@ class FastDecisionEngine:
                 method="POST",
             )
 
-            with urllib.request.urlopen(http_req, timeout=self.timeout) as response:
+            with urllib.request.urlopen(http_req, timeout=self.timeout) as response:  # nosec B310 - trusted localhost URL
                 result = json.loads(response.read().decode())
 
             # Extract response

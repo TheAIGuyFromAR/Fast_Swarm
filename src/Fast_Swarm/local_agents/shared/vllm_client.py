@@ -47,7 +47,7 @@ except ImportError:
 from urllib.parse import urlparse
 
 _parsed = urlparse(VLLM_URL)
-VLLM_HOST = _parsed.hostname or "0.0.0.0"
+VLLM_HOST = _parsed.hostname or "127.0.0.1"  # Default to localhost, not all interfaces
 VLLM_PORT = _parsed.port or 8000
 
 
@@ -108,7 +108,7 @@ class VLLMClient:
         """Check if vLLM server is running."""
         try:
             req = urllib.request.Request(f"{self.base_url}/health")
-            with urllib.request.urlopen(req, timeout=5) as response:
+            with urllib.request.urlopen(req, timeout=5) as response:  # nosec B310 - trusted localhost URL
                 return response.status == 200
         except Exception:
             return False
@@ -117,7 +117,7 @@ class VLLMClient:
         """List available models."""
         try:
             req = urllib.request.Request(f"{self.base_url}/v1/models")
-            with urllib.request.urlopen(req, timeout=10) as response:
+            with urllib.request.urlopen(req, timeout=10) as response:  # nosec B310 - trusted localhost URL
                 data = json.loads(response.read().decode())
                 return [m["id"] for m in data.get("data", [])]
         except Exception:
@@ -262,7 +262,7 @@ class VLLMClient:
                     method="POST",
                 )
 
-                with urllib.request.urlopen(req, timeout=self.timeout) as response:
+                with urllib.request.urlopen(req, timeout=self.timeout) as response:  # nosec B310
                     result = json.loads(response.read().decode())
 
                     # Extract response

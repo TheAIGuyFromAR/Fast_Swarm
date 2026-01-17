@@ -98,7 +98,7 @@ class OllamaClient:
         """Check if Ollama server is running."""
         try:
             req = urllib.request.Request(f"{self.base_url}/api/tags")
-            with urllib.request.urlopen(req, timeout=5) as response:
+            with urllib.request.urlopen(req, timeout=5) as response:  # nosec B310 - trusted localhost URL
                 return response.status == 200
         except Exception:
             return False
@@ -107,7 +107,7 @@ class OllamaClient:
         """List available models."""
         try:
             req = urllib.request.Request(f"{self.base_url}/api/tags")
-            with urllib.request.urlopen(req, timeout=10) as response:
+            with urllib.request.urlopen(req, timeout=10) as response:  # nosec B310 - trusted localhost URL
                 data = json.loads(response.read().decode())
                 return [m["name"] for m in data.get("models", [])]
         except Exception:
@@ -166,7 +166,7 @@ class OllamaClient:
                     method="POST",
                 )
 
-                with urllib.request.urlopen(req, timeout=self.timeout) as response:
+                with urllib.request.urlopen(req, timeout=self.timeout) as response:  # nosec B310
                     result = json.loads(response.read().decode())
                     content = result.get("response", "")
 

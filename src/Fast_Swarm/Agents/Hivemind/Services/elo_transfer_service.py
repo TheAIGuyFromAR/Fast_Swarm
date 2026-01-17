@@ -17,7 +17,7 @@ Design Philosophy:
 
 import math
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -291,7 +291,7 @@ async def apply_elo_transfers(
         old_elo = float(coach.elo_rating)
         new_elo = max(0, old_elo + outcome.elo_change)  # Floor at 0
         coach.elo_rating = Decimal(str(new_elo))
-        coach.updated_at = datetime.utcnow()
+        coach.updated_at = datetime.now(UTC)
 
         session.add(coach)
 
@@ -560,7 +560,7 @@ async def get_system_elo_balance(session: AsyncSession) -> dict:
 
 
 # =============================================================================
-# Stub Functions (Not Yet Implemented)
+# Backtest Integration Functions
 # =============================================================================
 
 
@@ -572,18 +572,68 @@ async def apply_backtest_tax(
     """
     Apply flat backtest tax to a trio (ELO sink).
 
-    TODO: Implement when backtest integration is complete.
+    Every backtest costs a flat tax that leaves the system permanently.
+    This creates deflationary pressure - coaches must consistently perform
+    well just to maintain their ELO, preventing passive accumulation.
+
+    The tax is split equally across all coaches in the trio (tax_amount / 3 each).
 
     Args:
         session: Database session
         trio_id: ID of the trio being taxed
-        tax_amount: Amount of ELO to remove (default: BACKTEST_ELO_TAX)
+        tax_amount: Amount of ELO to remove (default: BACKTEST_ELO_TAX = 5)
 
     Returns:
-        ELOTransfer record for audit
+        ELOTransfer record for audit trail
     """
-    # TODO: Implement backtest tax application
-    raise NotImplementedError("apply_backtest_tax not yet implemented")
+    from .trio_management_service import get_trio_coaches
+
+    # Get all coaches in this trio
+    trio_coaches = await get_trio_coaches(session, trio_id)
+
+    if not trio_coaches:
+        # No coaches to tax - create record but no actual transfers
+        transfer = ELOTransfer(
+            transfer_type="tax",
+            from_entity_type="system",
+            from_entity_id=trio_id,
+            to_entity_type="system",
+            to_entity_id="void",
+            amount=Decimal("0"),
+            trio_id=trio_id,
+            reason="backtest_tax_no_coaches",
+        )
+        session.add(transfer)
+        await session.commit()
+        return transfer
+
+    # Split tax equally across coaches
+    tax_per_coach = tax_amount / len(trio_coaches)
+
+    # Deduct from each coach's ELO
+    for coach in trio_coaches:
+        old_elo = float(coach.elo_rating)
+        new_elo = max(0, old_elo - tax_per_coach)  # Floor at 0
+        coach.elo_rating = Decimal(str(new_elo))
+        coach.updated_at = datetime.now(UTC)
+        session.add(coach)
+
+    # Create aggregate tax transfer record (ELO leaving the system)
+    transfer = ELOTransfer(
+        transfer_type="tax",
+        from_entity_type="trio",
+        from_entity_id=trio_id,
+        to_entity_type="system",
+        to_entity_id="void",  # ELO permanently removed
+        amount=Decimal(str(tax_amount)),
+        trio_id=trio_id,
+        reason=f"backtest_flat_tax_{tax_per_coach:.2f}_per_coach",
+    )
+
+    session.add(transfer)
+    await session.commit()
+
+    return transfer
 
 
 async def process_trade_leg_results(
@@ -595,22 +645,78 @@ async def process_trade_leg_results(
     """
     Process trade leg results and apply ELO transfers.
 
-    This is a higher-level function that:
-    1. Fetches all votes for the leg
-    2. Calculates transfers via calculate_trio_transfers()
-    3. Applies the transfers to coach ELO ratings
-    4. Creates audit records
+    This is the main orchestration function that gets called when a trade leg
+    closes. It handles the full pipeline:
 
-    TODO: Implement when trade leg tracking is complete.
+    1. Fetches the TradeLeg to get leg_type and trio_id
+    2. Fetches all HivemindVotes for this leg
+    3. Calculates ELO transfers using calculate_trio_transfers()
+    4. Applies transfers to coach ELO ratings
+    5. Updates vote records with outcomes
+    6. Creates audit trail records
 
     Args:
         session: Database session
         leg_id: ID of the completed trade leg
-        pnl_pct: P&L percentage of the leg
-        price_change_pct: Raw price change during leg
+        pnl_pct: P&L percentage of the leg (positive = profitable)
+        price_change_pct: Raw price change during leg (for HOLD evaluation)
 
     Returns:
-        TransferResult with all outcomes
+        TransferResult with all outcomes and transfers applied
     """
-    # TODO: Implement trade leg result processing
-    raise NotImplementedError("process_trade_leg_results not yet implemented")
+    from ..Models.coach_models import TradeLeg
+
+    # 1. Fetch the trade leg
+    leg_result = await session.exec(
+        select(TradeLeg).where(TradeLeg.leg_id == leg_id)
+    )
+    leg = leg_result.first()
+
+    if not leg:
+        raise ValueError(f"Trade leg not found: {leg_id}")
+
+    # 2. Fetch all votes for this leg
+    votes_result = await session.exec(
+        select(HivemindVote).where(HivemindVote.leg_id == leg_id)
+    )
+    votes = list(votes_result.all())
+
+    if not votes:
+        # No votes cast for this leg - return empty result
+        return TransferResult(
+            leg_id=leg_id,
+            outcomes=[],
+            total_tax=0.0,
+            net_elo_moved=0.0,
+        )
+
+    # 3. Calculate all transfers
+    transfer_result = calculate_trio_transfers(
+        votes=votes,
+        pnl_pct=pnl_pct,
+        price_change_pct=price_change_pct,
+        leg_type=leg.leg_type,
+    )
+
+    # 4. Apply ELO transfers to coaches
+    await apply_elo_transfers(session, transfer_result, leg.trio_id)
+
+    # 5. Update vote records with outcomes
+    for outcome in transfer_result.outcomes:
+        # Find the vote record for this coach
+        for vote in votes:
+            if vote.coach_id == outcome.coach_id:
+                vote.was_correct = outcome.was_correct
+                vote.elo_change = Decimal(str(outcome.elo_change))
+                session.add(vote)
+                break
+
+    # 6. Mark the leg as closed with P&L
+    leg.is_closed = True
+    leg.pnl_pct = Decimal(str(pnl_pct))
+    leg.closed_at = datetime.now(UTC)
+    session.add(leg)
+
+    await session.commit()
+
+    return transfer_result

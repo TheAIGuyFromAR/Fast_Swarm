@@ -98,10 +98,11 @@ from .trio_management_service import (
 )
 from .trio_voting_service import (
     AgentVote,
-    HivemindVoteResult,
+    HivemindDecision,
     TrioDecision,
-    aggregate_agent_votes,
-    aggregate_trio_votes,
+    aggregate_hivemind_votes,
+    calculate_trio_decision,
+    collect_agent_votes,
     execute_trio_voting_round,
 )
 
@@ -152,10 +153,11 @@ __all__ = [
     "apply_clone_bonus",
     # Trio Voting
     "AgentVote",
-    "HivemindVoteResult",
+    "HivemindDecision",
     "TrioDecision",
-    "aggregate_agent_votes",
-    "aggregate_trio_votes",
+    "collect_agent_votes",
+    "aggregate_hivemind_votes",
+    "calculate_trio_decision",
     "execute_trio_voting_round",
     # Data Feed
     "HivemindDataFeedService",

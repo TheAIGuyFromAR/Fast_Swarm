@@ -42,8 +42,9 @@ get_windows_for_timeframe = windows_module.get_windows_for_timeframe
 get_pool_stats = windows_module.get_pool_stats
 
 # Load template
+from jinja2 import select_autoescape
 PROMPTS_DIR = Path(__file__).parent.parent / "local_agents" / "prompts"
-env = Environment(loader=FileSystemLoader(str(PROMPTS_DIR)))
+env = Environment(loader=FileSystemLoader(str(PROMPTS_DIR)), autoescape=select_autoescape())
 AI_TEMPLATE = env.get_template("ai_zone_decision.j2")
 
 # vLLM runs in WSL - use WSL IP (get dynamically or use localhost if WSL2 mirrored networking)
