@@ -1,0 +1,28 @@
+{
+  "agent_id": "canonical-trend_follower-777",
+  "trait_hash": "2ed4044be80c2f44e7cfd633310f13436620354d725105ae816be5a4203b74be",
+  "traits": {
+    "adaptability": 0.9335671805773,
+    "breakout_preference": 0.8,
+    "correlation_awareness": 0.10358232898131614,
+    "drawdown_sensitivity": 0.7523163560031157,
+    "entry_aggression": 0.6222433339601738,
+    "exit_aggression": 0.3895915642491937,
+    "funding_rate_sensitivity": 0.8881824637439067,
+    "hold_duration_bias": 0.8,
+    "lookback_preference": 0.28896643129516897,
+    "mean_reversion": 0.6432807115972682,
+    "momentum_vs_reversion": 0.9,
+    "news_reactivity": 0.9292201929855926,
+    "patience": 0.7,
+    "profit_target_greed": 0.269835098321503,
+    "risk_tolerance": 0.22933408950153078,
+    "sentiment_contrarian": 0.6919591432659481,
+    "sentiment_weight": 0.9931563744011908,
+    "stop_loss_tightness": 0.9122532879410743,
+    "trend_following": 0.95,
+    "volatility_seeking": 0.36859824937216046,
+    "volume_sensitivity": 0.5844605659498704,
+    "win_rate_preference": 0.3361436466700177
+  }
+}

@@ -146,8 +146,8 @@ class PatternDiscoveryService:
                     tested += 1
                     print(f"fitness={avg_fitness:.1f}, trades={total_trades}, windows={len(all_results)} ({pattern_elapsed:.1f}s)")
                 else:
-                    print(f"NO RESULTS ({pattern_elapsed:.1f}s)")
-                    results[pid] = {"error": "No results from backtest"}
+                    print(f"0 trades, 0 windows ({pattern_elapsed:.1f}s)")
+                    results[pid] = {"total_trades": 0, "windows_tested": 0}
 
             except Exception as e:
                 print(f"ERROR: {e}")
@@ -226,6 +226,143 @@ class PatternDiscoveryService:
 
         await session.commit()
         return promotions
+
+    async def test_pattern_on_windows(
+        self,
+        session: AsyncSession,
+        pattern,
+        windows: list[dict],
+        preloaded_candles: dict = None,
+    ) -> dict:
+        """
+        Test a single pattern on pre-loaded windows (used by orchestrator).
+
+        This is called by the orchestrator to test patterns one at a time
+        on windows that have already been loaded. This avoids loading
+        candle data multiple times.
+
+        Args:
+            session: Database session
+            pattern: Pattern model object
+            windows: List of window dicts with asset/timeframe/start_ts/end_ts
+            preloaded_candles: Dict of (symbol, timeframe, start_ts) -> DataFrame
+
+        Returns:
+            Dict with test results
+        """
+        import time
+
+        pattern_start = time.time()
+        pid = pattern.pattern_id
+
+        # Log window details at start
+        if windows:
+            w = windows[0]
+            window_summary = f"{w.get('asset', '?')}/{w.get('timeframe', '?')}"
+            if len(windows) > 1:
+                window_summary += f" (+{len(windows)-1} more)"
+            print(f"[PatternTest] {pid[:8]}: testing on {window_summary}...")
+
+        # Convert pattern model to dict format for backtest_pattern_on_windows
+        pattern_dict = {
+            "pattern_id": pattern.pattern_id,
+            "entry_conditions": pattern.entry_conditions,
+            "exit_conditions": pattern.exit_conditions,
+        }
+
+        all_results = []
+
+        for window in windows:
+            try:
+                # backtest_pattern_on_windows expects windows as list
+                window_results = await backtest_pattern_on_windows(
+                    session,
+                    pattern_dict,
+                    [window],
+                    window.get("asset", "BTC"),
+                    window.get("timeframe", "1h"),
+                    preloaded_candles=preloaded_candles,
+                )
+                all_results.extend(window_results)
+            except Exception as e:
+                print(f"[PatternTest] Window error for {pid[:8]}: {e}")
+
+        pattern_elapsed = time.time() - pattern_start
+
+        if all_results:
+            # Aggregate results
+            avg_fitness = sum(r.get("fitness_score", 0) for r in all_results) / len(all_results)
+            total_trades = sum(r.get("total_trades", 0) for r in all_results)
+
+            # Extract key metrics for logging
+            avg_alpha = sum(r.get("alpha_pct", 0) for r in all_results) / len(all_results)
+            avg_sortino = sum(r.get("sortino_ratio", 0) for r in all_results) / len(all_results)
+            avg_drawdown = sum(r.get("max_drawdown_pct", 0) for r in all_results) / len(all_results)
+            avg_win_rate = sum(r.get("win_rate", 0) for r in all_results) / len(all_results)
+            total_pnl = sum(r.get("total_pnl_pct", 0) for r in all_results)
+
+            # Get window info for logging
+            window_info = ""
+            if windows:
+                w = windows[0]
+                asset = w.get("asset", "?")
+                tf = w.get("timeframe", "?")
+                regime = w.get("regime", "?")
+                window_info = f"{asset}/{tf} ({regime})"
+
+            # Update pattern stats
+            pattern.fitness_score = avg_fitness
+            pattern.total_runs = (pattern.total_runs or 0) + len(all_results)
+            pattern.periods_tested = (pattern.periods_tested or 0) + len(all_results)
+
+            from datetime import datetime
+            pattern.last_backtest_at = datetime.utcnow()
+
+            session.add(pattern)
+
+            # Enhanced logging with key fitness components
+            print(
+                f"[PatternTest] {pid[:8]}: "
+                f"fitness={avg_fitness:.1f}, trades={total_trades}, "
+                f"α={avg_alpha:+.1f}%, sortino={avg_sortino:.2f}, "
+                f"DD={avg_drawdown:.1f}%, WR={avg_win_rate:.0f}%, "
+                f"PnL={total_pnl:+.1f}% | {window_info} ({pattern_elapsed:.1f}s)"
+            )
+
+            return {
+                "pattern_id": pid,
+                "fitness": avg_fitness,
+                "total_trades": total_trades,
+                "windows_tested": len(all_results),
+            }
+        else:
+            # No windows produced results - could be: no entry signals, asset mismatch, or too few candles
+            window_info = ""
+            candle_info = ""
+            if windows:
+                w = windows[0]
+                asset = w.get('asset', '?')
+                tf = w.get('timeframe', '?')
+                window_info = f" | {asset}/{tf}"
+
+                # Check candle count if preloaded_candles available
+                if preloaded_candles:
+                    cache_key = f"{asset}_{tf}"
+                    if cache_key in preloaded_candles:
+                        try:
+                            candles = preloaded_candles[cache_key]
+                            candle_info = f" ({len(candles)} candles)"
+                        except Exception:
+                            candle_info = " (candles err)"
+                    else:
+                        candle_info = f" (no {cache_key} in cache)"
+
+            print(f"[PatternTest] {pid[:8]}: 0 trades, 0 windows{window_info}{candle_info} ({pattern_elapsed:.1f}s)")
+            return {
+                "pattern_id": pid,
+                "total_trades": 0,
+                "windows_tested": 0,
+            }
 
     async def _run_in_thread(self, func, *args, **kwargs):
         """Run blocking function in thread pool."""

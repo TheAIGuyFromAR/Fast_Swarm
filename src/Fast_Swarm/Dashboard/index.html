@@ -264,7 +264,7 @@
                     <div class="sort-controls">
                         <button class="sort-btn active" data-sort="fitness_score">FITNESS</button>
                         <button class="sort-btn" data-sort="annualized_roi_pct">ROI</button>
-                        <button class="sort-btn" data-sort="sharpe_ratio">SHARPE</button>
+                        <button class="sort-btn" data-sort="sortino_ratio">SORTINO</button>
                         <button class="sort-btn" data-sort="win_rate">WIN RATE</button>
                     </div>
                 </div>
@@ -279,7 +279,7 @@
                     </div>
                     <div class="stat-card">
                         <div class="stat-value cyan" id="stat-pattern-sharpe">--</div>
-                        <div class="stat-label">AVG SHARPE</div>
+                        <div class="stat-label">AVG SORTINO</div>
                     </div>
                     <div class="stat-card">
                         <div class="stat-value yellow" id="stat-pattern-roi">--</div>
@@ -299,7 +299,7 @@
                         <button class="sort-btn active" data-sort="fitness_score">FITNESS</button>
                         <button class="sort-btn" data-sort="elo_rating">ELO</button>
                         <button class="sort-btn" data-sort="annualized_roi_pct">ROI</button>
-                        <button class="sort-btn" data-sort="sharpe_ratio">SHARPE</button>
+                        <button class="sort-btn" data-sort="sortino_ratio">SORTINO</button>
                     </div>
                 </div>
                 <div class="stats-bar" id="agent-stats">
@@ -316,8 +316,8 @@
                         <div class="stat-label">AVG ELO</div>
                     </div>
                     <div class="stat-card">
-                        <div class="stat-value cyan" id="stat-agent-sharpe">--</div>
-                        <div class="stat-label">AVG SHARPE</div>
+                        <div class="stat-value cyan" id="stat-agent-sortino">--</div>
+                        <div class="stat-label">AVG SORTINO</div>
                     </div>
                 </div>
                 <div class="distribution-row">
@@ -383,6 +383,6 @@
         </footer>
     </div>
 
-    <script src="/dashboard/js/app.js"></script>
+    <script src="/dashboard/js/app.js?v=4"></script>
 </body>
 </html>

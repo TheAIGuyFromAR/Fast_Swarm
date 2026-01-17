@@ -205,7 +205,7 @@ def calculate_metrics_for_trades(
             "window_days": window_days,
         }
 
-    pnls = [t.get("pnl_pct", 0) or 0 for t in trades]
+    pnls = [float(t.get("pnl_pct", 0) or 0) for t in trades]
     winning = [p for p in pnls if p > 0]
     losing = [p for p in pnls if p <= 0]
 
@@ -318,6 +318,7 @@ async def backtest_pattern_on_windows(
     windows: list[dict],
     asset: str,
     timeframe: str,
+    preloaded_candles: dict = None,
 ) -> list[dict]:
     """
     Run backtest for a pattern on multiple windows.
@@ -330,6 +331,8 @@ async def backtest_pattern_on_windows(
         windows: List of window configs from generate_random_windows
         asset: Asset symbol
         timeframe: Timeframe
+        preloaded_candles: Optional dict of "{symbol}_{timeframe}" -> DataFrame
+                          for pre-loaded candle data (avoids repeated DB loads)
 
     Returns:
         List of result dicts, one per window with trades
@@ -393,6 +396,7 @@ async def backtest_pattern_on_windows(
                     loader=loader,
                     config=config,
                     patterns=pattern_dict,
+                    preloaded_candles=preloaded_candles,
                 )
 
                 trades = engine.run(
@@ -475,7 +479,9 @@ async def _get_window_benchmark(
     end_row = result.fetchone()
 
     if start_row and end_row and start_row[0] > 0:
-        return ((end_row[0] - start_row[0]) / start_row[0]) * 100
+        start_price = float(start_row[0])
+        end_price = float(end_row[0])
+        return ((end_price - start_price) / start_price) * 100
     return 0.0
 
 

@@ -388,7 +388,7 @@ class AgentBacktestServiceDev:
             # Persist trades
             if res.get("trades"):
                 try:
-                    await persist_trades(session, res["trades"], "evolution_backtest_dev", timeframe)
+                    await persist_trades(session, res["trades"], "evolution_backtest_dev", timeframe, fetch_indicators=True)
                 except Exception as e:
                     print(f"[BacktestDev] Trade persist error: {e}")
 

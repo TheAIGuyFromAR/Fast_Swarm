@@ -1,0 +1,48 @@
+{# ============================================================================
+   TEMPLATE OPTIMIZED FOR PREFIX CACHING
+   Loads shared components FIRST (cached), then dynamic data LAST
+   ============================================================================ #}
+
+{# LEVEL 1: STATIC IDENTITY - Cached globally #}
+{% include '_shared/identity.md' %}
+
+{# LEVEL 2: INDICATOR DICTIONARY - Cached globally #}
+{% include '_shared/indicators.md' %}
+
+{# LEVEL 3: MARKET STATE - Cached per candle batch #}
+---
+## Current Market State
+Asset: {{ asset }}
+Pattern: {{ pattern_name }} ({{ pattern_id }})
+Direction: {{ direction }}
+Confidence: {{ "%.2f"|format(confidence) }} (uncertain zone: {{ "%.2f"|format(min_threshold) }} - {{ "%.2f"|format(ai_threshold) }})
+
+### All Indicators
+{% for indicator, value in indicators.items() %}
+- {{ indicator }}: {{ "%.4f"|format(value) if value is number else value }}
+{% endfor %}
+
+{# LEVEL 4: AGENT CONTEXT - Varies per agent #}
+---
+## Agent: {{ agent_name }}
+
+### Personality Traits
+{% for trait, value in traits.items() %}
+- {{ trait }}: {{ "%.2f"|format(value) }}
+{% endfor %}
+
+### Trading Philosophy
+{{ philosophy | default("Trade with discipline and follow your patterns.") }}
+
+### Recent Performance
+- Win Rate: {{ "%.1f"|format(recent_win_rate * 100) }}%
+- Recent PnL: {{ "%.2f"|format(recent_pnl_pct) }}%
+- Trades Today: {{ trades_today }}
+
+### Relevant Memories
+{% for memory in memories %}
+- [{{ memory.type }}] {{ memory.content }} (weight: {{ "%.2f"|format(memory.weight) }})
+{% endfor %}
+
+{# LEVEL 5: OUTPUT FORMAT - Cached globally #}
+{% include '_shared/output-format.md' %}

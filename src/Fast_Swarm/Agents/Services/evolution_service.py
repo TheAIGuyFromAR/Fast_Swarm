@@ -374,12 +374,111 @@ class AgentEvolutionService:
 
         return clone.agent_id
 
+    async def batch_clone_agents(
+        self,
+        session: AsyncSession,
+        parents: list[Agent],
+        mutation_rate: float = 0.1,
+    ) -> tuple[list[str], list[dict]]:
+        """
+        Clone multiple agents in a single batch operation.
+
+        Optimized version that:
+        - Creates all clones in memory first
+        - Updates all parent levels
+        - Single commit at the end (instead of N commits)
+
+        Args:
+            session: Database session
+            parents: List of parent Agent objects (already loaded)
+            mutation_rate: Mutation rate for traits (0.1 = ±10%)
+
+        Returns:
+            Tuple of (cloned_ids, failures)
+        """
+        from Fast_Swarm.local_agents.core.genesis import spawn_agent
+        from Fast_Swarm.local_agents.core.state import AgentDatabase
+
+        agent_db = AgentDatabase()
+        cloned_ids = []
+        failures = []
+        clones_to_add = []
+
+        for parent in parents:
+            try:
+                # Mutate traits
+                parent_traits = parent.traits if isinstance(parent.traits, dict) else parent.traits.__dict__
+                mutated_traits = {}
+
+                for key, value in parent_traits.items():
+                    if isinstance(value, (int, float)):
+                        mutation = (random.random() - 0.5) * 2 * mutation_rate
+                        mutated_traits[key] = max(0, min(1, value + mutation))
+                    else:
+                        mutated_traits[key] = value
+
+                # Get patterns from parent's JSONB
+                available_patterns = _extract_patterns_from_agent(parent)
+
+                # Spawn with mutated traits
+                agent_record = spawn_agent(
+                    seed=random.randint(0, 1000000),
+                    available_patterns=available_patterns,
+                    generation=parent.generation + 1,
+                    use_llm=False,
+                    db=agent_db,
+                )
+
+                agent_record.traits = mutated_traits
+
+                # Create clone object (don't add to session yet)
+                clone = Agent(
+                    agent_id=agent_record.agent_id,
+                    name=f"agent_{agent_record.agent_id[:8]}",
+                    traits=mutated_traits,
+                    assigned_patterns=parent.assigned_patterns,
+                    pattern_weights=parent.pattern_weights,
+                    generation=parent.generation + 1,
+                    parent_a_id=parent.agent_id,
+                    trading_philosophy=parent.trading_philosophy,
+                    is_active=True,
+                    status="active",
+                    level=1,
+                )
+
+                clones_to_add.append(clone)
+                cloned_ids.append(clone.agent_id)
+
+                # Update parent level (in memory)
+                parent.level = (parent.level or 0) + 1
+
+            except Exception as e:
+                logger.error(f"Clone failed for {parent.agent_id}: {e}", exc_info=True)
+                failures.append({
+                    "parent_id": parent.agent_id,
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                })
+
+        # Batch add all clones and updated parents
+        for clone in clones_to_add:
+            session.add(clone)
+        for parent in parents:
+            session.add(parent)
+
+        # Single commit for entire batch
+        await session.commit()
+
+        return cloned_ids, failures
+
     async def crossover_agents(
         self,
         session: AsyncSession,
-        parent_a_id: str,
-        parent_b_id: str,
+        parent_a_id: str = None,
+        parent_b_id: str = None,
         noise_rate: float = 0.05,
+        parent_a: Agent = None,
+        parent_b: Agent = None,
     ) -> str:
         """
         Create crossbred offspring from two parents.
@@ -391,22 +490,24 @@ class AgentEvolutionService:
 
         Args:
             session: Database session
-            parent_a_id: First parent ID
-            parent_b_id: Second parent ID
+            parent_a_id: First parent ID (optional if parent_a provided)
+            parent_b_id: Second parent ID (optional if parent_b provided)
             noise_rate: Noise rate for crossover (0.05 = ±5%)
+            parent_a: First parent Agent object (avoids DB lookup)
+            parent_b: Second parent Agent object (avoids DB lookup)
 
         Returns:
             New agent ID
         """
-        # Get parents
-        result = await session.exec(select(Agent).where(Agent.agent_id.in_([parent_a_id, parent_b_id])))
-        parents = result.all()
-
-        if len(parents) != 2:
-            raise ValueError("Could not find both parents")
-
-        parent_a = parents[0]
-        parent_b = parents[1]
+        # Use provided Agent objects or fetch by ID (backwards compatible)
+        if parent_a is None or parent_b is None:
+            ids = [pid for pid in [parent_a_id, parent_b_id] if pid]
+            result = await session.exec(select(Agent).where(Agent.agent_id.in_(ids)))
+            parents = result.all()
+            if len(parents) != 2:
+                raise ValueError("Could not find both parents")
+            parent_a = parents[0]
+            parent_b = parents[1]
 
         # Check for same lineage (V3's areSameLineage)
         if self._are_same_lineage(parent_a, parent_b):
@@ -534,26 +635,12 @@ class AgentEvolutionService:
             bottom_percentile=retirement_percentile,
         )
 
-        # Phase 2: CLONE top performers (with error aggregation)
-        cloned_ids = []
-        clone_failures = []
-        for agent in top_agents:
-            try:
-                clone_id = await self.clone_agent(
-                    session=session,
-                    parent_id=agent.agent_id,
-                    mutation_rate=clone_mutation_rate,
-                )
-                cloned_ids.append(clone_id)
-            except Exception as e:
-                logger.error(f"Clone failed for {agent.agent_id}: {e}", exc_info=True)
-                clone_failures.append(
-                    {
-                        "parent_id": agent.agent_id,
-                        "error": str(e),
-                        "error_type": type(e).__name__,
-                    }
-                )
+        # Phase 2: CLONE top performers (batch operation - single commit)
+        cloned_ids, clone_failures = await self.batch_clone_agents(
+            session=session,
+            parents=top_agents,
+            mutation_rate=clone_mutation_rate,
+        )
 
         # Phase 3: CROSSBREED compatible pairs (with error aggregation)
         crossbred_ids = []
@@ -571,8 +658,8 @@ class AgentEvolutionService:
             try:
                 child_id = await self.crossover_agents(
                     session=session,
-                    parent_a_id=parent_a.agent_id,
-                    parent_b_id=parent_b.agent_id,
+                    parent_a=parent_a,
+                    parent_b=parent_b,
                     noise_rate=crossover_noise_rate,
                 )
                 crossbred_ids.append(child_id)

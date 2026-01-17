@@ -557,3 +557,92 @@ async def _run_migrations(conn):
             print("[DB] Backfill ON CONFLICT will fail until duplicates are removed")
         else:
             print(f"[DB] Index creation error: {e}")
+
+    # Performance indexes for candle lookups (10-50x faster queries)
+    await conn.execute(
+        text("""
+        CREATE INDEX IF NOT EXISTS idx_enhanced_candles_symbol_tf_time
+        ON enhanced_candles(symbol, timeframe, time DESC)
+    """)
+    )
+
+    # Agent backtest window detection index
+    await conn.execute(
+        text("""
+        CREATE INDEX IF NOT EXISTS idx_backtest_trades_agent_window
+        ON backtest_trades_unified(agent_id, symbol, timeframe, entry_timestamp)
+    """)
+    )
+
+    # GIN index for JSONB pattern queries on agents
+    await conn.execute(
+        text("""
+        CREATE INDEX IF NOT EXISTS idx_agents_assigned_patterns_gin
+        ON agents USING GIN(assigned_patterns)
+    """)
+    )
+
+    # Composite index for pattern priority queue (discovery service)
+    await conn.execute(
+        text("""
+        CREATE INDEX IF NOT EXISTS idx_patterns_priority_backtest
+        ON patterns(is_active, priority DESC NULLS LAST, last_backtest_at ASC NULLS FIRST)
+    """)
+    )
+
+    # Composite index for active patterns with fitness (stats service)
+    await conn.execute(
+        text("""
+        CREATE INDEX IF NOT EXISTS idx_patterns_active_fitness
+        ON patterns(is_active, fitness_score DESC NULLS LAST)
+    """)
+    )
+
+    # Partial index for active agents only (faster evolution queries)
+    await conn.execute(
+        text("""
+        CREATE INDEX IF NOT EXISTS idx_agents_active_only
+        ON agents(fitness_score DESC NULLS LAST) WHERE status = 'active'
+    """)
+    )
+
+    # Materialized view for fast time range lookups (avoids full table scan)
+    await conn.execute(
+        text("""
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_matviews WHERE matviewname = 'asset_timeframe_ranges'
+            ) THEN
+                CREATE MATERIALIZED VIEW asset_timeframe_ranges AS
+                SELECT symbol, timeframe,
+                       EXTRACT(EPOCH FROM MIN(time)) * 1000 as min_ts,
+                       EXTRACT(EPOCH FROM MAX(time)) * 1000 as max_ts,
+                       COUNT(*) as candle_count
+                FROM enhanced_candles
+                GROUP BY symbol, timeframe;
+
+                CREATE UNIQUE INDEX ON asset_timeframe_ranges(symbol, timeframe);
+            END IF;
+        END $$
+    """)
+    )
+    print("[DB] Performance indexes created")
+
+    # Migration: Fix stale pattern fitness values
+    # Patterns with non-zero fitness but 0 trades/ROI/win_rate are stale - reset to NULL
+    result = await conn.execute(
+        text("""
+            UPDATE patterns
+            SET fitness_score = NULL
+            WHERE fitness_score IS NOT NULL
+              AND fitness_score > 0
+              AND (total_trades IS NULL OR total_trades = 0)
+              AND (total_roi_pct IS NULL OR total_roi_pct = 0)
+              AND (win_rate IS NULL OR win_rate = 0)
+            RETURNING pattern_id
+        """)
+    )
+    rows = result.fetchall()
+    if rows:
+        print(f"[DB] Fixed {len(rows)} patterns with stale fitness values (reset to NULL)")

@@ -281,15 +281,26 @@ class PatternDiscoveryScheduler:
             if not indicators:
                 continue
 
-            # Skip if missing price data
-            if not entry_price or not mfe_price or not mae_price:
+            # Need at least entry_price and mfe_pct/mae_pct
+            if not entry_price:
                 continue
 
             entry_price = float(entry_price)
-            mfe_price = float(mfe_price) if mfe_price else entry_price
-            mae_price = float(mae_price) if mae_price else entry_price
             mfe_pct = float(mfe_pct) if mfe_pct else 0
             mae_pct = float(mae_pct) if mae_pct else 0
+
+            # Calculate prices from percentages if not provided
+            if mfe_price:
+                mfe_price = float(mfe_price)
+            else:
+                # Derive from entry_price and mfe_pct
+                mfe_price = entry_price * (1 + mfe_pct / 100)
+
+            if mae_price:
+                mae_price = float(mae_price)
+            else:
+                # Derive from entry_price and mae_pct (mae_pct is negative)
+                mae_price = entry_price * (1 + mae_pct / 100)
 
             # 1. CHAOS/ORIGINAL - actual trade
             chaos_trade = {
