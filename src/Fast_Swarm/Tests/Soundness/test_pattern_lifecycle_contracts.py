@@ -263,11 +263,11 @@ class TestQuintileBasedTierSystem:
         """Only Tier 1 and 2 patterns can be shown to agents for spawn."""
         from Patterns.Services.pattern_service import is_spawn_eligible
 
-        assert is_spawn_eligible(tier=1) == True, "Tier 1 should be spawn eligible"
-        assert is_spawn_eligible(tier=2) == True, "Tier 2 should be spawn eligible"
-        assert is_spawn_eligible(tier=3) == False, "Tier 3 should NOT be spawn eligible"
-        assert is_spawn_eligible(tier=4) == False, "Tier 4 should NOT be spawn eligible"
-        assert is_spawn_eligible(tier=5) == False, "Tier 5 should NOT be spawn eligible"
+        assert is_spawn_eligible(tier=1) is True, "Tier 1 should be spawn eligible"
+        assert is_spawn_eligible(tier=2) is True, "Tier 2 should be spawn eligible"
+        assert is_spawn_eligible(tier=3) is False, "Tier 3 should NOT be spawn eligible"
+        assert is_spawn_eligible(tier=4) is False, "Tier 4 should NOT be spawn eligible"
+        assert is_spawn_eligible(tier=5) is False, "Tier 5 should NOT be spawn eligible"
 
 
 # =============================================================================
@@ -471,10 +471,10 @@ class TestSpawnEligibilityRequirements:
             "timeframes_tested": ["1m", "15m", "1h", "1d"],
         }
 
-        assert is_spawn_eligible(pattern_few_tests) == False, (
+        assert is_spawn_eligible(pattern_few_tests) is False, (
             "Pattern with < 100 backtests should NOT be spawn eligible"
         )
-        assert is_spawn_eligible(pattern_many_tests) == True, (
+        assert is_spawn_eligible(pattern_many_tests) is True, (
             "Pattern with >= 100 backtests should be spawn eligible (if tier 1-2)"
         )
 
@@ -495,10 +495,10 @@ class TestSpawnEligibilityRequirements:
             "tier": 1,
         }
 
-        assert is_spawn_eligible(pattern_few_assets) == False, (
+        assert is_spawn_eligible(pattern_few_assets) is False, (
             "Pattern tested on < 3 assets should NOT be spawn eligible"
         )
-        assert is_spawn_eligible(pattern_many_assets) == True, "Pattern tested on >= 3 assets should be spawn eligible"
+        assert is_spawn_eligible(pattern_many_assets) is True, "Pattern tested on >= 3 assets should be spawn eligible"
 
     def test_all_timeframes_required(self):
         """Pattern needs to be tested on all 4 timeframes: 1m, 15m, 1h, 1d."""
@@ -517,8 +517,8 @@ class TestSpawnEligibilityRequirements:
             "tier": 1,
         }
 
-        assert is_spawn_eligible(pattern_partial) == False, "Pattern missing timeframes should NOT be spawn eligible"
-        assert is_spawn_eligible(pattern_complete) == True, "Pattern tested on all timeframes should be spawn eligible"
+        assert is_spawn_eligible(pattern_partial) is False, "Pattern missing timeframes should NOT be spawn eligible"
+        assert is_spawn_eligible(pattern_complete) is True, "Pattern tested on all timeframes should be spawn eligible"
 
     def test_cull_requires_same_eligibility(self):
         """Patterns cannot be culled until they meet the same eligibility requirements."""
@@ -533,7 +533,7 @@ class TestSpawnEligibilityRequirements:
             "timeframes_tested": [],
         }
 
-        assert is_cull_eligible(pattern_undertested) == False, "Cannot cull pattern until it has 100+ backtests"
+        assert is_cull_eligible(pattern_undertested) is False, "Cannot cull pattern until it has 100+ backtests"
 
 
 # =============================================================================

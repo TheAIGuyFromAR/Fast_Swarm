@@ -190,6 +190,11 @@ class Coach(SQLModel, table=True):
 
     # Lifecycle
     status: str = Field(default="active")  # active, dead
+    trading_tier: str = Field(default="paper")  # paper, live
+
+    # Promotion/demotion tracking
+    promoted_at: datetime | None = None  # When promoted to live trading
+    demoted_at: datetime | None = None  # When demoted back to paper
 
     # Stats
     total_trades: int = Field(default=0)

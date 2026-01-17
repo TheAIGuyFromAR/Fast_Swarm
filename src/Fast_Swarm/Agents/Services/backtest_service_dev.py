@@ -324,7 +324,7 @@ class AgentBacktestServiceDev:
         # 3. Load patterns
         from ...Patterns.Models.pattern_models import Pattern
 
-        pattern_result = await session.exec(select(Pattern).where(Pattern.is_active == True))
+        pattern_result = await session.exec(select(Pattern).where(Pattern.is_active.is_(True)))
         patterns = pattern_result.all()
         pattern_lookup = {
             p.pattern_id: {

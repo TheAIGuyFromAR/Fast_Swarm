@@ -3,6 +3,7 @@
 Provides normalized WebSocket clients for multiple trading exchanges:
 - Binance (spot & futures)
 - Coinbase
+- Crypto.com (spot & perpetuals)
 - Hyperliquid (perpetuals)
 - dYdX (perpetuals)
 
@@ -21,6 +22,7 @@ from .base_ws import (
 )
 from .binance_ws import BinanceWebSocket
 from .coinbase_ws import CoinbaseWebSocket
+from .cryptocom_ws import CryptoComWebSocket
 from .dydx_ws import DydxWebSocket
 from .dydx_ws import FundingData as DydxFundingData
 from .dydx_ws import OpenInterestData as DydxOpenInterestData
@@ -40,6 +42,7 @@ __all__ = [
     # Exchange implementations
     "BinanceWebSocket",
     "CoinbaseWebSocket",
+    "CryptoComWebSocket",
     "HyperliquidWebSocket",
     "DydxWebSocket",
     # Funding/OI data types

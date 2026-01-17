@@ -21,7 +21,7 @@ async def get_pattern_average_stats(session: AsyncSession):
             func.avg(Pattern.total_trades).label('avg_trades'),
             func.avg(Pattern.total_roi_pct).label('avg_roi'),
             func.avg(Pattern.sortino_ratio).label('avg_sortino'),
-        ).where(Pattern.is_active == True, Pattern.fitness_score.isnot(None))
+        ).where(Pattern.is_active.is_(True), Pattern.fitness_score.isnot(None))
     )
     row = result.one()
 
@@ -42,7 +42,7 @@ async def get_pattern_average_stats(session: AsyncSession):
             Pattern.status,
             func.count().label('count')
         ).where(
-            Pattern.is_active == True,
+            Pattern.is_active.is_(True),
             Pattern.fitness_score.isnot(None)
         ).group_by(Pattern.status)
     )
@@ -51,7 +51,7 @@ async def get_pattern_average_stats(session: AsyncSession):
     # Top 5 performers (only fetches 5 rows, not all patterns)
     top_result = await session.execute(
         select(Pattern.name, Pattern.fitness_score, Pattern.status)
-        .where(Pattern.is_active == True, Pattern.fitness_score.isnot(None))
+        .where(Pattern.is_active.is_(True), Pattern.fitness_score.isnot(None))
         .order_by(Pattern.fitness_score.desc())
         .limit(5)
     )

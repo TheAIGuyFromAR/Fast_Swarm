@@ -130,7 +130,7 @@ async def collect_agent_votes(
         select(AgentInstance)
         .where(AgentInstance.coach_id == coach_id)
         .where(AgentInstance.roster_status == "active")
-        .where(AgentInstance.is_active == True)
+        .where(AgentInstance.is_active.is_(True))
     )
     agents = result.all()
 

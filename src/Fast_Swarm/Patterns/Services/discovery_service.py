@@ -204,7 +204,7 @@ class PatternDiscoveryService:
             Dict with promotion counts
         """
         # Get patterns that need tier updates
-        result = await session.exec(select(Pattern).where(Pattern.is_active == True))
+        result = await session.exec(select(Pattern).where(Pattern.is_active.is_(True)))
         patterns = result.all()
 
         promotions = {"to_tier_1": 0, "to_tier_2": 0}

@@ -24,7 +24,7 @@ async def real_patterns(db_session: AsyncSession) -> list[dict[str, Any]]:
     """Get real patterns from PostgreSQL for testing."""
     from Fast_Swarm.Patterns.Models.pattern_models import Pattern
 
-    result = await db_session.exec(select(Pattern).where(Pattern.is_active == True).limit(10))
+    result = await db_session.exec(select(Pattern).where(Pattern.is_active.is_(True)).limit(10))
     patterns = result.all()
 
     # If no patterns exist, create test patterns

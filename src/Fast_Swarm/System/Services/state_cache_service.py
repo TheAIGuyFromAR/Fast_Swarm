@@ -40,7 +40,7 @@ class StateCacheService:
         from ...Patterns.Models.pattern_models import Pattern
 
         # Get all active patterns
-        result = await session.exec(select(Pattern).where(Pattern.is_active == True))
+        result = await session.exec(select(Pattern).where(Pattern.is_active.is_(True)))
         patterns = result.all()
 
         # Build cache

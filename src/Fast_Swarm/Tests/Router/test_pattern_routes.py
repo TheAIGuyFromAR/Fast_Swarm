@@ -224,7 +224,7 @@ class TestPostCreatePattern:
     def test_create_pattern_default_active(self):
         """CONTRACT: New patterns are active by default."""
         new_pattern = {"is_active": True}
-        assert new_pattern["is_active"] == True
+        assert new_pattern["is_active"] is True
 
 
 # =============================================================================
@@ -271,7 +271,7 @@ class TestDeletePattern:
         pattern = mock_patterns[0]
         pattern["is_active"] = False
 
-        assert pattern["is_active"] == False
+        assert pattern["is_active"] is False
         assert "pattern_id" in pattern  # Still exists
 
     def test_delete_pattern_preserves_data(self, mock_patterns):

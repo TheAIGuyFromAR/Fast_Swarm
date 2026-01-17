@@ -269,7 +269,11 @@ def generate_pool(seed: int = 42) -> list[Window]:
 
             # Add a few random windows for variety
             for _ in range(min(3, n_windows // 2)):
-                duration = random.randint(min_days, min(max_days, int(data_days * 0.8)))
+                # Clamp duration to valid range: at least min_days, at most 80% of data
+                max_duration = max(min_days, min(max_days, int(data_days * 0.8)))
+                if max_duration < min_days:
+                    continue  # Skip if not enough data for min window
+                duration = random.randint(min_days, max_duration)
                 max_start = data_end - timedelta(days=duration)
                 days_range = (max_start - data_start).days
                 if days_range > 0:

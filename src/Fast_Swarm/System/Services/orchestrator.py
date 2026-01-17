@@ -254,7 +254,7 @@ class BacktestOrchestrator:
         # Get patterns that need testing (priority queue)
         result = await session.execute(
             select(Pattern)
-            .where(Pattern.is_active == True)
+            .where(Pattern.is_active.is_(True))
             .where(Pattern.status != "archived")
             .order_by(Pattern.priority.desc(), Pattern.last_backtest_at.asc().nullsfirst())
             .limit(self.PATTERNS_PER_BATCH)
@@ -307,7 +307,7 @@ class BacktestOrchestrator:
         # Get agents that need testing
         result = await session.execute(
             select(Agent)
-            .where(Agent.is_active == True)
+            .where(Agent.is_active.is_(True))
             .order_by(Agent.last_backtest_at.asc().nullsfirst())
             .limit(self.AGENTS_PER_BATCH)
         )

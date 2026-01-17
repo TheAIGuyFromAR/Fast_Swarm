@@ -332,7 +332,7 @@ async def clone_coach(
     parent_roster_result = await session.exec(
         select(AgentInstance)
         .where(AgentInstance.coach_id == parent.coach_id)
-        .where(AgentInstance.is_active == True)
+        .where(AgentInstance.is_active.is_(True))
     )
     parent_roster = parent_roster_result.all()
 

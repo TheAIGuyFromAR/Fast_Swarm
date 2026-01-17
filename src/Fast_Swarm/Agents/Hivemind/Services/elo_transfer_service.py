@@ -557,3 +557,60 @@ async def get_system_elo_balance(session: AsyncSession) -> dict:
         "net_balance": total_spawned - total_taxed - total_deaths,
         "active_coaches": len(coaches),
     }
+
+
+# =============================================================================
+# Stub Functions (Not Yet Implemented)
+# =============================================================================
+
+
+async def apply_backtest_tax(
+    session: AsyncSession,
+    trio_id: str,
+    tax_amount: float = BACKTEST_ELO_TAX,
+) -> ELOTransfer:
+    """
+    Apply flat backtest tax to a trio (ELO sink).
+
+    TODO: Implement when backtest integration is complete.
+
+    Args:
+        session: Database session
+        trio_id: ID of the trio being taxed
+        tax_amount: Amount of ELO to remove (default: BACKTEST_ELO_TAX)
+
+    Returns:
+        ELOTransfer record for audit
+    """
+    # TODO: Implement backtest tax application
+    raise NotImplementedError("apply_backtest_tax not yet implemented")
+
+
+async def process_trade_leg_results(
+    session: AsyncSession,
+    leg_id: str,
+    pnl_pct: float,
+    price_change_pct: float,
+) -> TransferResult:
+    """
+    Process trade leg results and apply ELO transfers.
+
+    This is a higher-level function that:
+    1. Fetches all votes for the leg
+    2. Calculates transfers via calculate_trio_transfers()
+    3. Applies the transfers to coach ELO ratings
+    4. Creates audit records
+
+    TODO: Implement when trade leg tracking is complete.
+
+    Args:
+        session: Database session
+        leg_id: ID of the completed trade leg
+        pnl_pct: P&L percentage of the leg
+        price_change_pct: Raw price change during leg
+
+    Returns:
+        TransferResult with all outcomes
+    """
+    # TODO: Implement trade leg result processing
+    raise NotImplementedError("process_trade_leg_results not yet implemented")
