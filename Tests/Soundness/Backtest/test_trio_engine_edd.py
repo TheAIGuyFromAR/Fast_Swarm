@@ -14,8 +14,8 @@ Division Hotspots Tested:
 4. _to_btc: zero prices
 """
 
-import math
 from dataclasses import dataclass
+import math
 from unittest.mock import MagicMock
 
 import pytest
@@ -184,7 +184,7 @@ class TestEvaluateConditionsDivisionSafety:
         """
         # This should not crash - depends on implementation
         try:
-            matched, confidence = engine._evaluate_conditions(None, {"rsi_14": 50})
+            matched, _ = engine._evaluate_conditions(None, {"rsi_14": 50})
             assert matched is False
         except TypeError:
             # If it raises TypeError, that's acceptable - just shouldn't crash unexpectedly
@@ -337,7 +337,7 @@ class TestCheckEntryEdgeCases:
         agent = MockAgent.with_patterns(["empty_conditions"])
         indicators = {"rsi_14": 25}
 
-        triggered, confidence, pattern_id = engine_with_patterns._check_entry(agent, indicators)
+        triggered, _, _ = engine_with_patterns._check_entry(agent, indicators)
 
         assert triggered is False
 
@@ -348,7 +348,7 @@ class TestCheckEntryEdgeCases:
         agent = MockAgent.with_patterns(["missing_conditions"])
         indicators = {"rsi_14": 25}
 
-        triggered, confidence, pattern_id = engine_with_patterns._check_entry(agent, indicators)
+        triggered, _, _ = engine_with_patterns._check_entry(agent, indicators)
 
         assert triggered is False
 
@@ -372,7 +372,7 @@ class TestCheckEntryEdgeCases:
         agent = MockAgent.with_patterns(["rsi_oversold"], min_threshold=2.0)  # Impossibly high
         indicators = {"rsi_14": 25}
 
-        triggered, confidence, pattern_id = engine_with_patterns._check_entry(agent, indicators)
+        triggered, _, _ = engine_with_patterns._check_entry(agent, indicators)
 
         assert triggered is False
 
@@ -406,7 +406,7 @@ class TestCheckExitEdgeCases:
         agent = MockAgent.with_patterns(["rsi_oversold"], min_threshold=0.3)
         indicators = {"rsi_14": 75}  # Above 70, should trigger exit
 
-        triggered, confidence, pattern_id = engine_with_patterns._check_exit(agent, indicators)
+        triggered, _, pattern_id = engine_with_patterns._check_exit(agent, indicators)
 
         assert triggered is True
         assert pattern_id == "rsi_oversold"
@@ -418,7 +418,7 @@ class TestCheckExitEdgeCases:
         agent = MockAgent.with_patterns(["rsi_dict_exit"], min_threshold=0.3)
         indicators = {"rsi_14": 70}  # Above 65, should trigger
 
-        triggered, confidence, pattern_id = engine_with_patterns._check_exit(agent, indicators)
+        triggered, _, pattern_id = engine_with_patterns._check_exit(agent, indicators)
 
         assert triggered is True
         assert pattern_id == "rsi_dict_exit"
@@ -437,7 +437,7 @@ class TestCheckExitEdgeCases:
         agent = MockAgent.with_patterns(["pnl_only"])
         indicators = {"rsi_14": 75}
 
-        triggered, confidence, pattern_id = engine_with_patterns._check_exit(agent, indicators)
+        triggered, _, _ = engine_with_patterns._check_exit(agent, indicators)
 
         # Should not crash, and should return False (no indicator conditions to match)
         assert triggered is False
@@ -449,7 +449,7 @@ class TestCheckExitEdgeCases:
         agent = MockAgent.with_patterns(["empty_conditions"])
         indicators = {"rsi_14": 75}
 
-        triggered, confidence, pattern_id = engine_with_patterns._check_exit(agent, indicators)
+        triggered, _, _ = engine_with_patterns._check_exit(agent, indicators)
 
         assert triggered is False
 
@@ -460,7 +460,7 @@ class TestCheckExitEdgeCases:
         agent = MockAgent.with_patterns(["missing_conditions"])
         indicators = {"rsi_14": 75}
 
-        triggered, confidence, pattern_id = engine_with_patterns._check_exit(agent, indicators)
+        triggered, _, _ = engine_with_patterns._check_exit(agent, indicators)
 
         assert triggered is False
 
@@ -481,7 +481,7 @@ class TestIndicatorEdgeCases:
         conditions = [{"indicator": "nonexistent", "operator": "<", "value": 50}]
         indicators = {"rsi_14": 30}  # Different indicator
 
-        matched, confidence = engine._evaluate_conditions(conditions, indicators)
+        matched, _ = engine._evaluate_conditions(conditions, indicators)
 
         assert matched is False  # Can't match if indicator missing
 
@@ -492,7 +492,7 @@ class TestIndicatorEdgeCases:
         conditions = [{"indicator": "rsi_14", "operator": "<", "value": 50}]
         indicators = {"rsi_14": None}
 
-        matched, confidence = engine._evaluate_conditions(conditions, indicators)
+        matched, _ = engine._evaluate_conditions(conditions, indicators)
 
         assert matched is False
 
@@ -504,7 +504,7 @@ class TestIndicatorEdgeCases:
         indicators = {"rsi_14": float("nan")}
 
         # Should not crash
-        matched, confidence = engine._evaluate_conditions(conditions, indicators)
+        matched, _ = engine._evaluate_conditions(conditions, indicators)
 
         # NaN comparisons return False
         assert matched is False
@@ -516,7 +516,7 @@ class TestIndicatorEdgeCases:
         conditions = [{"indicator": "rsi_14", "operator": "<", "value": 50}]
         indicators = {"rsi_14": float("inf")}
 
-        matched, confidence = engine._evaluate_conditions(conditions, indicators)
+        matched, _ = engine._evaluate_conditions(conditions, indicators)
 
         assert matched is False  # inf is not < 50
 
@@ -527,15 +527,15 @@ class TestIndicatorEdgeCases:
         conditions = [{"indicator": "rsi_14", "operator": "between", "value": [30, 70]}]
 
         # Test in range
-        matched, confidence = engine._evaluate_conditions(conditions, {"rsi_14": 50})
+        matched, _ = engine._evaluate_conditions(conditions, {"rsi_14": 50})
         assert matched is True
 
         # Test below range
-        matched, confidence = engine._evaluate_conditions(conditions, {"rsi_14": 20})
+        matched, _ = engine._evaluate_conditions(conditions, {"rsi_14": 20})
         assert matched is False
 
         # Test above range
-        matched, confidence = engine._evaluate_conditions(conditions, {"rsi_14": 80})
+        matched, _ = engine._evaluate_conditions(conditions, {"rsi_14": 80})
         assert matched is False
 
     def test_all_operators(self, engine):
@@ -637,7 +637,7 @@ class TestBestPatternSelection:
         agent = MockAgent.with_patterns(["pattern_a", "pattern_b"], min_threshold=0.1)
         indicators = {"rsi_14": 30, "macd_line": 0}
 
-        triggered, confidence, pattern_id = engine._check_entry(agent, indicators)
+        triggered, _, pattern_id = engine._check_entry(agent, indicators)
 
         assert triggered is True
         # Both should match - pattern_b has more conditions but both conditions matched
