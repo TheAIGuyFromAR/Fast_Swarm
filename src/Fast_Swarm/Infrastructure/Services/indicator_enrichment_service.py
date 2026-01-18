@@ -48,12 +48,16 @@ async def compute_derived_indicators_batch(
         session: Database session
         symbol: Optional symbol filter (e.g., 'BTC')
         timeframe: Optional timeframe filter (e.g., '1h')
-        limit: Optional limit on rows to process
+        limit: Optional limit on rows to process (BATCH_SIZE)
 
     Returns:
         Number of rows updated
     """
-    # Build WHERE clause for filtering - use direct UPDATE (faster on compressed hypertables)
+    # Use time-range batching for TimescaleDB compressed hypertables
+    # First, get the time range for rows that need processing
+    batch_limit = limit or BATCH_SIZE
+
+    # Build WHERE clause for filtering
     where_clauses = ["derived_computed_at IS NULL"]
     if symbol:
         where_clauses.append(f"symbol = '{symbol}'")
@@ -62,8 +66,27 @@ async def compute_derived_indicators_batch(
 
     where_sql = " AND ".join(where_clauses)
 
-    # Direct UPDATE without subquery - much faster on TimescaleDB compressed hypertables
-    # The correlated subquery approach causes full table scans due to decompression
+    # Step 1: Get time bounds for this batch (TimescaleDB partitions by time)
+    # This lets us UPDATE a small time range instead of scanning the whole table
+    bounds_sql = text(f"""
+        SELECT MIN(time) as min_time, MAX(time) as max_time
+        FROM (
+            SELECT time FROM enhanced_candles
+            WHERE {where_sql}
+            ORDER BY time
+            LIMIT {batch_limit}
+        ) batch
+    """)
+    bounds_result = await session.execute(bounds_sql)
+    bounds = bounds_result.fetchone()
+
+    if not bounds or bounds[0] is None:
+        return 0  # No rows to process
+
+    min_time, max_time = bounds[0], bounds[1]
+
+    # Step 2: UPDATE only the time range we identified
+    # This is much faster because TimescaleDB can decompress just the relevant chunks
     update_sql = text(f"""
         UPDATE enhanced_candles
         SET
@@ -189,9 +212,10 @@ async def compute_derived_indicators_batch(
             derived_computed_at = NOW()
 
         WHERE {where_sql}
+          AND time >= :min_time AND time <= :max_time
     """)
 
-    result = await session.execute(update_sql)
+    result = await session.execute(update_sql, {"min_time": min_time, "max_time": max_time})
     await session.commit()
 
     return result.rowcount
