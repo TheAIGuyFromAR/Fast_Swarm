@@ -6,7 +6,8 @@
 
 // Use same origin as the dashboard (works on any port)
 const API_URL = window.location.origin;
-const REFRESH_INTERVAL = 30000; // 30 seconds - reduced from 5s to avoid hammering
+const REFRESH_INTERVAL = 60000; // 60 seconds for full refresh (SSE handles real-time)
+const CACHE_TTL = 30000; // 30 second cache TTL
 
 // State
 let currentPage = 'orchestrator';
@@ -15,6 +16,116 @@ let patternsData = [];
 let tradesData = [];
 let currentSort = { agents: 'fitness_score', patterns: 'fitness_score' };
 let killRateHistory = [];
+let eventSource = null;
+
+// ============================================
+// CACHING LAYER
+// ============================================
+
+const cache = new Map();
+
+async function fetchWithCache(url, maxAgeMs = CACHE_TTL) {
+    const cacheKey = url;
+    const cached = cache.get(cacheKey);
+
+    if (cached && (Date.now() - cached.timestamp < maxAgeMs)) {
+        return cached.data;
+    }
+
+    try {
+        const response = await fetch(API_URL + url);
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        const data = await response.json();
+
+        cache.set(cacheKey, { data, timestamp: Date.now() });
+        return data;
+    } catch (error) {
+        // Return stale cache if available on error
+        if (cached) {
+            console.warn('Using stale cache for', url, ':', error.message);
+            return cached.data;
+        }
+        throw error;
+    }
+}
+
+function invalidateCache(urlPattern) {
+    for (const key of cache.keys()) {
+        if (key.includes(urlPattern)) {
+            cache.delete(key);
+        }
+    }
+}
+
+// ============================================
+// SERVER-SENT EVENTS (Real-time updates)
+// ============================================
+
+function initSSE() {
+    if (eventSource) {
+        eventSource.close();
+    }
+
+    eventSource = new EventSource(API_URL + '/system/events');
+
+    eventSource.onmessage = function(event) {
+        try {
+            const message = JSON.parse(event.data);
+
+            switch (message.type) {
+                case 'orchestrator':
+                    // Update orchestrator HUD in real-time
+                    if (currentPage === 'orchestrator') {
+                        updatePhaseHUD(message.data);
+                        updateOrchestratorMetrics(message.data);
+                    }
+                    break;
+
+                case 'streams':
+                    // Update stream status indicator
+                    updateStreamStatus(message.data);
+                    break;
+
+                case 'error':
+                    console.warn('SSE error:', message.data);
+                    break;
+            }
+        } catch (e) {
+            console.error('SSE parse error:', e);
+        }
+    };
+
+    eventSource.onerror = function(event) {
+        console.warn('SSE connection error, will reconnect...');
+        // EventSource automatically reconnects
+    };
+
+    addLogEntry('SYSTEM', 'Real-time updates connected');
+}
+
+function updateOrchestratorMetrics(data) {
+    // Update progress bars and counts from SSE data
+    if (data.patterns_total > 0) {
+        var pct = Math.round((data.patterns_tested / data.patterns_total) * 100);
+        updateBar('patterns-bar', pct);
+    }
+    if (data.agents_total > 0) {
+        var pct = Math.round((data.agents_tested / data.agents_total) * 100);
+        updateBar('agents-bar', pct);
+    }
+}
+
+function updateStreamStatus(streams) {
+    var statusIndicator = document.getElementById('system-status');
+    if (!statusIndicator) return;
+
+    var allConnected = Object.values(streams).every(function(s) {
+        return s.state === 'connected';
+    });
+
+    statusIndicator.classList.toggle('offline', !allConnected);
+    statusIndicator.querySelector('.status-text').textContent = allConnected ? 'ONLINE' : 'DEGRADED';
+}
 
 // ============================================
 // INITIALIZATION
@@ -24,6 +135,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initNavigation();
     initControls();
     initClock();
+    initSSE();  // Start real-time updates
     startDataRefresh();
     addLogEntry('SYSTEM', 'Dashboard initialized');
 });
@@ -576,56 +688,73 @@ async function fetchFundingRates() {
 
 async function fetchPatternsData() {
     try {
-        var results = await Promise.all([
+        var results = await Promise.allSettled([
             fetch(API_URL + '/patterns?limit=100'),
             fetch(API_URL + '/patterns/stats/average')
         ]);
 
-        if (results[0].ok) {
-            patternsData = await results[0].json();
+        // Handle patterns list
+        if (results[0].status === 'fulfilled' && results[0].value.ok) {
+            patternsData = await results[0].value.json();
+            console.log('Patterns loaded:', patternsData.length, 'patterns');
             renderPatternsTable();
+        } else {
+            var reason = results[0].status === 'rejected' ? results[0].reason : 'HTTP ' + results[0].value.status;
+            console.error('Patterns fetch failed:', reason);
+            document.getElementById('patterns-table').textContent = 'Error loading patterns: ' + reason;
         }
 
-        if (results[1].ok) {
-            var stats = await results[1].json();
+        // Handle stats separately
+        if (results[1].status === 'fulfilled' && results[1].value.ok) {
+            var stats = await results[1].value.json();
             // API returns: count, averages {fitness_score, win_rate, total_trades, total_roi_pct}, by_status, top_performers
             var avgs = stats.averages || {};
             document.getElementById('stat-pattern-total').textContent = stats.count || patternsData.length;
             document.getElementById('stat-pattern-fitness').textContent = avgs.fitness_score ? avgs.fitness_score.toFixed(1) : '--';
-            document.getElementById('stat-pattern-sharpe').textContent = '--'; // Not in stats
+            document.getElementById('stat-pattern-sharpe').textContent = avgs.sortino_ratio ? avgs.sortino_ratio.toFixed(2) : '--';
             document.getElementById('stat-pattern-roi').textContent = avgs.total_roi_pct ? avgs.total_roi_pct.toFixed(1) + '%' : '--';
         }
     } catch (error) {
         console.error('Patterns fetch error:', error);
-        document.getElementById('patterns-table').textContent = 'Error loading patterns';
+        document.getElementById('patterns-table').textContent = 'Error loading patterns: ' + error.message;
     }
 }
 
 function renderPatternsTable() {
     var container = document.getElementById('patterns-table');
-    if (!container || patternsData.length === 0) {
-        if (container) container.textContent = 'No patterns found';
+    if (!container) {
+        console.error('patterns-table container not found');
         return;
     }
 
-    // Filter out patterns with zero/null fitness (untested chaos patterns)
-    var testedPatterns = patternsData.filter(function(p) {
-        return p.fitness_score && p.fitness_score > 0;
-    });
+    console.log('renderPatternsTable called, patternsData.length:', patternsData.length);
 
-    if (testedPatterns.length === 0) {
-        container.textContent = 'No backtested patterns yet (all ' + patternsData.length + ' patterns pending backtest)';
+    if (patternsData.length === 0) {
+        container.textContent = 'No patterns found';
         return;
     }
 
-    var sorted = testedPatterns.slice().sort(function(a, b) {
-        return (b[currentSort.patterns] || 0) - (a[currentSort.patterns] || 0);
-    });
+    try {
+        // Filter out patterns with zero/null fitness (untested chaos patterns)
+        var testedPatterns = patternsData.filter(function(p) {
+            return p.fitness_score && parseFloat(p.fitness_score) > 0;
+        });
 
-    var table = document.createElement('table');
+        console.log('Tested patterns (fitness > 0):', testedPatterns.length);
+
+        if (testedPatterns.length === 0) {
+            container.textContent = 'No backtested patterns yet (all ' + patternsData.length + ' patterns pending backtest)';
+            return;
+        }
+
+        var sorted = testedPatterns.slice().sort(function(a, b) {
+            return (parseFloat(b[currentSort.patterns]) || 0) - (parseFloat(a[currentSort.patterns]) || 0);
+        });
+
+        var table = document.createElement('table');
     var thead = document.createElement('thead');
     var headerRow = document.createElement('tr');
-    ['RANK', 'PATTERN ID', 'FITNESS', 'ROI %', 'SHARPE', 'WIN RATE', 'MAX DD'].forEach(function(text) {
+    ['RANK', 'PATTERN ID', 'FITNESS', 'ROI %', 'SORTINO', 'WIN RATE', 'MAX DD'].forEach(function(text) {
         var th = document.createElement('th');
         th.textContent = text;
         headerRow.appendChild(th);
@@ -636,11 +765,11 @@ function renderPatternsTable() {
     var tbody = document.createElement('tbody');
     sorted.forEach(function(pattern, index) {
         var rank = index + 1;
-        var fitness = pattern.fitness_score || 0;
-        var roi = pattern.total_roi_pct || 0; // Model uses total_roi_pct
-        var sharpe = pattern.sharpe_ratio || 0;
-        var winRate = (pattern.win_rate || 0) * 100;
-        var maxDD = pattern.max_drawdown_pct || 0;
+        var fitness = parseFloat(pattern.fitness_score) || 0;
+        var roi = parseFloat(pattern.total_roi_pct) || 0; // Model uses total_roi_pct
+        var sortino = parseFloat(pattern.sortino_ratio) || 0;
+        var winRate = (parseFloat(pattern.win_rate) || 0) * 100;
+        var maxDD = parseFloat(pattern.max_drawdown_pct) || 0;
 
         var tr = document.createElement('tr');
         tr.onclick = function() { toggleDetails('details-' + pattern.pattern_id); };
@@ -675,10 +804,10 @@ function renderPatternsTable() {
         tdRoi.textContent = roi.toFixed(1) + '%';
         tr.appendChild(tdRoi);
 
-        var tdSharpe = document.createElement('td');
-        tdSharpe.className = 'metric ' + (sharpe >= 1.5 ? 'positive' : sharpe < 0.5 ? 'negative' : 'neutral');
-        tdSharpe.textContent = sharpe.toFixed(2);
-        tr.appendChild(tdSharpe);
+        var tdSortino = document.createElement('td');
+        tdSortino.className = 'metric ' + (sortino >= 1.5 ? 'positive' : sortino < 0.5 ? 'negative' : 'neutral');
+        tdSortino.textContent = sortino.toFixed(2);
+        tr.appendChild(tdSortino);
 
         var tdWr = document.createElement('td');
         tdWr.className = 'metric ' + (winRate >= 55 ? 'positive' : winRate < 45 ? 'negative' : 'neutral');
@@ -728,9 +857,14 @@ function renderPatternsTable() {
         tbody.appendChild(detailsRow);
     });
 
-    table.appendChild(tbody);
-    container.textContent = '';
-    container.appendChild(table);
+        table.appendChild(tbody);
+        container.textContent = '';
+        container.appendChild(table);
+        console.log('Patterns table rendered successfully');
+    } catch (err) {
+        console.error('Error rendering patterns table:', err);
+        container.textContent = 'Error rendering patterns: ' + err.message;
+    }
 }
 
 function toggleDetails(id) {
@@ -760,15 +894,17 @@ async function fetchAgentsData() {
             // API returns: count, average_fitness, average_traits
             var activeCount = stats.count || agentsData.filter(function(a) { return a.is_active; }).length;
             document.getElementById('stat-agent-active').textContent = activeCount;
-            document.getElementById('stat-agent-fitness').textContent = stats.average_fitness ? stats.average_fitness.toFixed(1) : '--';
-            // Calculate avg ELO and sharpe from agentsData since not in stats
-            var totalElo = 0, totalSharpe = 0, eloCount = 0, sharpeCount = 0;
+            document.getElementById('stat-agent-fitness').textContent = stats.average_fitness ? parseFloat(stats.average_fitness).toFixed(1) : '--';
+            // Calculate avg ELO and sortino from agentsData since not in stats
+            var totalElo = 0, totalSortino = 0, eloCount = 0, sortinoCount = 0;
             agentsData.forEach(function(a) {
-                if (a.elo_rating) { totalElo += a.elo_rating; eloCount++; }
-                if (a.sharpe_ratio) { totalSharpe += a.sharpe_ratio; sharpeCount++; }
+                var elo = parseFloat(a.elo_rating);
+                var sortino = parseFloat(a.sortino_ratio);
+                if (elo) { totalElo += elo; eloCount++; }
+                if (sortino) { totalSortino += sortino; sortinoCount++; }
             });
             document.getElementById('stat-agent-elo').textContent = eloCount > 0 ? (totalElo / eloCount).toFixed(0) : '--';
-            document.getElementById('stat-agent-sharpe').textContent = sharpeCount > 0 ? (totalSharpe / sharpeCount).toFixed(2) : '--';
+            document.getElementById('stat-agent-sortino').textContent = sortinoCount > 0 ? (totalSortino / sortinoCount).toFixed(2) : '--';
         }
     } catch (error) {
         console.error('Agents fetch error:', error);
@@ -784,13 +920,13 @@ function renderAgentsTable() {
     }
 
     var sorted = agentsData.slice().sort(function(a, b) {
-        return (b[currentSort.agents] || 0) - (a[currentSort.agents] || 0);
+        return (parseFloat(b[currentSort.agents]) || 0) - (parseFloat(a[currentSort.agents]) || 0);
     });
 
     var table = document.createElement('table');
     var thead = document.createElement('thead');
     var headerRow = document.createElement('tr');
-    ['RANK', 'AGENT', 'STATUS', 'GEN', 'FITNESS', 'ELO', 'ROI %', 'SHARPE'].forEach(function(text) {
+    ['RANK', 'AGENT', 'STATUS', 'GEN', 'FITNESS', 'ELO', 'ROI %', 'SORTINO'].forEach(function(text) {
         var th = document.createElement('th');
         th.textContent = text;
         headerRow.appendChild(th);
@@ -801,10 +937,10 @@ function renderAgentsTable() {
     var tbody = document.createElement('tbody');
     sorted.forEach(function(agent, index) {
         var rank = index + 1;
-        var fitness = agent.fitness_score || 0;
-        var elo = agent.elo_rating || 1500;
-        var roi = agent.annualized_roi_pct || 0;
-        var sharpe = agent.sharpe_ratio || 0;
+        var fitness = parseFloat(agent.fitness_score) || 0;
+        var elo = parseFloat(agent.elo_rating) || 1500;
+        var roi = parseFloat(agent.annualized_roi_pct) || 0;
+        var sortino = parseFloat(agent.sortino_ratio) || 0;
         var traits = agent.traits || {};
 
         var tr = document.createElement('tr');
@@ -856,10 +992,10 @@ function renderAgentsTable() {
         tdRoi.textContent = roi.toFixed(1) + '%';
         tr.appendChild(tdRoi);
 
-        var tdSharpe = document.createElement('td');
-        tdSharpe.className = 'metric ' + (sharpe >= 1.5 ? 'positive' : sharpe < 0.5 ? 'negative' : 'neutral');
-        tdSharpe.textContent = sharpe.toFixed(2);
-        tr.appendChild(tdSharpe);
+        var tdSortino = document.createElement('td');
+        tdSortino.className = 'metric ' + (sortino >= 1.5 ? 'positive' : sortino < 0.5 ? 'negative' : 'neutral');
+        tdSortino.textContent = sortino.toFixed(2);
+        tr.appendChild(tdSortino);
 
         tbody.appendChild(tr);
 
@@ -874,13 +1010,13 @@ function renderAgentsTable() {
 
         var details = [
             ['Trades', agent.total_trades || 0],
-            ['Win Rate', ((agent.win_rate || 0) * 100).toFixed(1) + '%'],
-            ['Sortino', (agent.sortino_ratio || 0).toFixed(2)],
-            ['Max DD', (agent.max_drawdown_pct || 0).toFixed(1) + '%'],
-            ['Risk Tolerance', ((traits.risk_tolerance || 0) * 100).toFixed(0) + '%'],
-            ['Entry Aggression', ((traits.entry_aggression || 0) * 100).toFixed(0) + '%'],
-            ['Exit Aggression', ((traits.exit_aggression || 0) * 100).toFixed(0) + '%'],
-            ['Sentiment Weight', ((traits.sentiment_weight || 0) * 100).toFixed(0) + '%']
+            ['Win Rate', ((parseFloat(agent.win_rate) || 0) * 100).toFixed(1) + '%'],
+            ['Sortino', (parseFloat(agent.sortino_ratio) || 0).toFixed(2)],
+            ['Max DD', (parseFloat(agent.max_drawdown_pct) || 0).toFixed(1) + '%'],
+            ['Risk Tolerance', ((parseFloat(traits.risk_tolerance) || 0) * 100).toFixed(0) + '%'],
+            ['Entry Aggression', ((parseFloat(traits.entry_aggression) || 0) * 100).toFixed(0) + '%'],
+            ['Exit Aggression', ((parseFloat(traits.exit_aggression) || 0) * 100).toFixed(0) + '%'],
+            ['Sentiment Weight', ((parseFloat(traits.sentiment_weight) || 0) * 100).toFixed(0) + '%']
         ];
 
         details.forEach(function(d) {
@@ -908,8 +1044,8 @@ function renderAgentsTable() {
 }
 
 function renderDistributions() {
-    renderDistribution('elo-distribution', agentsData.map(function(a) { return a.elo_rating || 1500; }), [1000, 1250, 1500, 1750, 2000], '#ff00ff');
-    renderDistribution('fitness-distribution', agentsData.map(function(a) { return a.fitness_score || 0; }), [0, 20, 40, 60, 80], '#00ff88');
+    renderDistribution('elo-distribution', agentsData.map(function(a) { return parseFloat(a.elo_rating) || 1500; }), [1000, 1250, 1500, 1750, 2000], '#ff00ff');
+    renderDistribution('fitness-distribution', agentsData.map(function(a) { return parseFloat(a.fitness_score) || 0; }), [0, 20, 40, 60, 80], '#00ff88');
 }
 
 function renderDistribution(canvasId, values, buckets, color) {

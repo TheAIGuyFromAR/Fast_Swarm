@@ -74,8 +74,8 @@ def is_container_running(container_name: str = "coinswarm-postgres") -> bool:
 
 def start_postgres_container() -> bool:
     """Start PostgreSQL container using docker-compose."""
-    # Find docker-compose.yml relative to this file
-    compose_file = Path(__file__).parent / "docker-compose.yml"
+    # Find docker-compose.yml in project root (2 levels up from this file)
+    compose_file = Path(__file__).parent.parent.parent / "docker-compose.yml"
 
     if not compose_file.exists():
         print(f"[Docker] docker-compose.yml not found at {compose_file}")

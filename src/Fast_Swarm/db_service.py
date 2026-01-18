@@ -60,7 +60,7 @@ class DatabaseService:
         async with async_session_maker() as session:
             statement = (
                 select(Pattern)
-                .where(Pattern.is_active == True)
+                .where(Pattern.is_active.is_(True))
                 .where(Pattern.entry_conditions.isnot(None))
                 .where(Pattern.total_runs >= min_trades)  # Only proven patterns!
                 .where(Pattern.fitness_score >= min_fitness)
@@ -128,7 +128,7 @@ class DatabaseService:
         """Get top patterns by fitness score."""
         async with async_session_maker() as session:
             statement = (
-                select(Pattern).where(Pattern.is_active == True).order_by(desc(Pattern.fitness_score)).limit(limit)
+                select(Pattern).where(Pattern.is_active.is_(True)).order_by(desc(Pattern.fitness_score)).limit(limit)
             )
             result = await session.scalars(statement)
             return list(result.all())

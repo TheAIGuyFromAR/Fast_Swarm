@@ -49,15 +49,8 @@ jobs:
       if: runner.os == 'Windows'
       shell: pwsh
       run: |
-        $files = Get-ChildItem -Recurse -Filter "*.py" |
-          Where-Object { $_.FullName -notmatch '\.git|venv|\.venv|tmpclaude-' } |
-          Select-Object -ExpandProperty FullName
-        if ($files) {
-          pylint $files --fail-under=7.0 --output-format=colorized
-        } else {
-          Write-Host "No Python files found"
-          exit 0
-        }
+        # Use directory-based invocation to avoid command line length limits
+        pylint src --fail-under=7.0 --output-format=colorized --ignore-patterns='\.git,venv,\.venv,tmpclaude-'
 
   # Separate job for PR annotations (Ubuntu only, avoids duplicate comments)
   annotate:

@@ -11,14 +11,15 @@ The Crucible is just a more rigorous backtest, not a different scoring system.
 from datetime import datetime
 from typing import Any
 
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import select
+
 from Fast_Swarm.Backtest.Services.backtest_service import (
     calculate_backtest_metrics,
     calculate_metrics_by_regime,
 )
 from Fast_Swarm.local_agents.backtest.engine import create_backtest_engine
 from Fast_Swarm.local_agents.core.state import AgentRecord
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import select
 
 from ..Models.crucible_models import CrucibleEntry
 
@@ -112,12 +113,30 @@ class CrucibleTestService:
             session.add(entry)
             await session.commit()
 
+            # 7. WISDOM GENERATION: Extract wisdom from successful Crucible completion
+            wisdom_id = None
+            try:
+                from .wisdom_service import WisdomTransferService
+
+                wisdom_service = WisdomTransferService()
+                wisdom = await wisdom_service.generate_wisdom_from_entry(
+                    session=session,
+                    entry_id=entry_id,
+                    use_llm=True,  # Use LLM if available, fall back to heuristic
+                )
+                if wisdom:
+                    wisdom_id = wisdom.id
+                    print(f"[Crucible] Generated wisdom {wisdom_id} from entry {entry_id}")
+            except Exception as e:
+                print(f"[Crucible] Wisdom generation failed for entry {entry_id}: {e}")
+
             return {
                 "entry_id": entry_id,
                 "status": "completed",
                 "overall_fitness": entry.overall_fitness,
                 "regime_scores": entry.regime_scores,
                 "total_trades": len(all_trades),
+                "wisdom_id": wisdom_id,
             }
 
         except Exception as e:

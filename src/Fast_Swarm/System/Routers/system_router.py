@@ -1,11 +1,15 @@
+import asyncio
+import json
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...Database import get_session
 from ..Models.crucible_models import CrucibleEntry, Wisdom
 from ..Services.crucible_entry_service import CrucibleEntryService
+from ..Services.orchestrator import get_orchestrator
 from ..Services.wisdom_service import WisdomTransferService
 
 router = APIRouter(prefix="/system", tags=["System"])
@@ -27,6 +31,160 @@ async def check_agent_for_crucible(agent_id: str, session: AsyncSession = Depend
 async def get_latest_wisdom(limit: int = 5, session: AsyncSession = Depends(get_session)):
     """Get the latest distilled wisdom from the swarm."""
     return await wisdom_service.get_latest_wisdom(session, limit)
+
+
+# =============================================================================
+# Memory Endpoints
+# =============================================================================
+
+
+@router.get("/memory/{agent_id}", tags=["Memory"])
+async def get_agent_memories(
+    agent_id: str,
+    limit: int = 50,
+    memory_type: str | None = None,
+    session: AsyncSession = Depends(get_session),
+):
+    """
+    Get memories for a specific agent.
+
+    Args:
+        agent_id: Agent ID to get memories for
+        limit: Maximum number of memories to return
+        memory_type: Optional filter by type (observation, opinion, lesson, counterfactual, regret, affirmation)
+
+    Returns:
+        List of memory objects with content, type, weight, and metadata
+    """
+    from ...Agents.Services.memory_service import get_agent_memories as fetch_memories
+
+    memories = await fetch_memories(session, agent_id, limit=limit)
+
+    # Filter by type if specified
+    if memory_type:
+        memories = [m for m in memories if m.memory_type == memory_type]
+
+    return [
+        {
+            "memory_id": m.memory_id,
+            "agent_id": m.agent_id,
+            "memory_type": m.memory_type,
+            "content": m.content,
+            "weight": m.weight,
+            "confidence": m.confidence,
+            "reinforcement_count": m.reinforcement_count,
+            "contradiction_count": m.contradiction_count,
+            "spawned_from": m.spawned_from,
+            "created_at": m.created_at.isoformat(),
+        }
+        for m in memories
+    ]
+
+
+@router.get("/memory/{agent_id}/stats", tags=["Memory"])
+async def get_agent_memory_stats(
+    agent_id: str,
+    session: AsyncSession = Depends(get_session),
+):
+    """
+    Get memory statistics for an agent.
+
+    Returns:
+        - total: Total memory count
+        - by_type: Breakdown by memory type
+        - avg_weight: Average memory weight
+        - weak_count: Memories with weight < 0.15 (need review)
+        - inherited_count: Memories inherited from parents
+    """
+    from ...Agents.Services.memory_integration_service import get_agent_memory_stats as fetch_stats
+
+    return await fetch_stats(session, agent_id)
+
+
+@router.get("/memory/{agent_id}/weak", tags=["Memory"])
+async def get_weak_memories(
+    agent_id: str,
+    session: AsyncSession = Depends(get_session),
+):
+    """
+    Get weak memories for an agent that may need review or deletion.
+
+    Weak memories have weight < 0.15 and may be:
+    - Outdated observations
+    - Contradicted lessons
+    - Low-confidence opinions
+
+    Returns:
+        List of weak memories sorted by weight (lowest first)
+    """
+    from ...Agents.Services.memory_service import get_weak_memories as fetch_weak
+
+    memories = await fetch_weak(session, agent_id)
+    return [
+        {
+            "memory_id": m.memory_id,
+            "memory_type": m.memory_type,
+            "content": m.content,
+            "weight": m.weight,
+            "reinforcement_count": m.reinforcement_count,
+            "contradiction_count": m.contradiction_count,
+            "created_at": m.created_at.isoformat(),
+        }
+        for m in memories
+    ]
+
+
+@router.get("/crucible/leaderboard", tags=["Crucible"])
+async def get_crucible_leaderboard(
+    limit: int = 20,
+    session: AsyncSession = Depends(get_session),
+):
+    """
+    Get the Crucible leaderboard - top performing agents who completed Crucible.
+
+    Returns agents ranked by overall fitness from Crucible tests, including
+    their wisdom contributions and regime performance breakdown.
+    """
+    from sqlalchemy import text
+
+    result = await session.execute(
+        text("""
+            SELECT
+                ce.agent_id,
+                ce.level_at_entry,
+                ce.overall_fitness,
+                ce.regime_scores,
+                ce.completed_at,
+                a.name as agent_name,
+                a.generation,
+                w.title as wisdom_title,
+                w.id as wisdom_id
+            FROM crucible_entries ce
+            LEFT JOIN agents a ON ce.agent_id = a.agent_id
+            LEFT JOIN wisdom w ON w.crucible_entry_id = ce.id
+            WHERE ce.status = 'completed'
+            ORDER BY ce.overall_fitness DESC
+            LIMIT :limit
+        """),
+        {"limit": limit}
+    )
+    rows = result.fetchall()
+
+    return [
+        {
+            "rank": idx + 1,
+            "agent_id": row[0],
+            "agent_name": row[5],
+            "level": row[1],
+            "generation": row[6],
+            "fitness": float(row[2]) if row[2] else 0,
+            "regime_scores": row[3] or {},
+            "completed_at": row[4].isoformat() if row[4] else None,
+            "wisdom_title": row[7],
+            "wisdom_id": row[8],
+        }
+        for idx, row in enumerate(rows)
+    ]
 
 
 @router.get("/health", tags=["Infrastructure"])
@@ -226,3 +384,216 @@ async def get_evolution_progress(session: AsyncSession = Depends(get_session)):
             "avg_cycle_duration_secs": round(float(evo_row[2]), 1) if evo_row and evo_row[2] else 0,
         },
     }
+
+
+@router.get("/orchestrator", tags=["Monitoring"])
+async def get_orchestrator_status():
+    """
+    Get the current status of the backtest orchestrator.
+
+    The orchestrator runs P2 operations (backtesting, evolution, pattern discovery)
+    sequentially to prevent resource contention.
+
+    Returns:
+    - running: Whether the orchestrator is active
+    - phase: Current phase (idle, loading_windows, testing_patterns, etc.)
+    - windows_loaded: Number of windows in current batch
+    - patterns_tested: Progress through pattern batch
+    - agents_tested: Progress through agent batch
+    - cycles_completed: Total pipeline cycles completed
+    """
+    orchestrator = get_orchestrator()
+    return orchestrator.get_status()
+
+
+@router.post("/orchestrator/start", tags=["Control"])
+async def start_orchestrator():
+    """Start the backtest orchestrator if not already running."""
+    orchestrator = get_orchestrator()
+    if orchestrator.is_running:
+        return {"message": "Orchestrator already running", "status": orchestrator.get_status()}
+    await orchestrator.start()
+    return {"message": "Orchestrator started", "status": orchestrator.get_status()}
+
+
+@router.post("/orchestrator/stop", tags=["Control"])
+async def stop_orchestrator():
+    """Stop the backtest orchestrator gracefully."""
+    orchestrator = get_orchestrator()
+    if not orchestrator.is_running:
+        return {"message": "Orchestrator not running", "status": orchestrator.get_status()}
+    await orchestrator.stop()
+    return {"message": "Orchestrator stopped", "status": orchestrator.get_status()}
+
+
+@router.get("/events", tags=["Monitoring"])
+async def event_stream():
+    """
+    Server-Sent Events (SSE) endpoint for real-time dashboard updates.
+
+    Streams orchestrator status, system health, and key metrics every 2 seconds.
+    Use this instead of polling for real-time updates.
+
+    Example usage in JavaScript:
+        const eventSource = new EventSource('/system/events');
+        eventSource.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            console.log(data.type, data.data);
+        };
+    """
+    async def generate():
+        import math
+
+        from ...Dependencies import stream_manager
+
+        while True:
+            try:
+                # Orchestrator status
+                orchestrator = get_orchestrator()
+                orchestrator_status = orchestrator.get_status()
+
+                yield f"data: {json.dumps({'type': 'orchestrator', 'data': orchestrator_status})}\n\n"
+
+                # Stream health (every other iteration to reduce load)
+                try:
+                    streams_status = {}
+                    for name, client in stream_manager.clients.items():
+                        status = client.get_status()
+                        secs = status.get("seconds_since_last_message", -1)
+                        if not math.isfinite(secs):
+                            secs = -1
+                        streams_status[name] = {
+                            "state": str(status.get("state", "unknown")),
+                            "seconds_since_last_message": secs,
+                        }
+                    yield f"data: {json.dumps({'type': 'streams', 'data': streams_status})}\n\n"
+                except Exception:
+                    pass  # Stream status is optional
+
+                await asyncio.sleep(2)
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                yield f"data: {json.dumps({'type': 'error', 'data': str(e)})}\n\n"
+                await asyncio.sleep(5)
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Disable nginx buffering
+        }
+    )
+
+
+@router.get("/metrics", tags=["Monitoring"])
+async def prometheus_metrics(session: AsyncSession = Depends(get_session)):
+    """
+    Prometheus-compatible metrics endpoint.
+
+    Returns metrics in Prometheus text format for scraping.
+    Includes: agent counts, pattern counts, orchestrator state, backtest metrics.
+    """
+    from sqlalchemy import text
+
+    metrics_lines = []
+
+    # Orchestrator metrics
+    orchestrator = get_orchestrator()
+    status = orchestrator.get_status()
+
+    metrics_lines.append("# HELP orchestrator_running Whether the orchestrator is running (1=yes, 0=no)")
+    metrics_lines.append("# TYPE orchestrator_running gauge")
+    metrics_lines.append(f"orchestrator_running {1 if status['running'] else 0}")
+
+    metrics_lines.append("# HELP orchestrator_cycles_completed Total orchestrator cycles completed")
+    metrics_lines.append("# TYPE orchestrator_cycles_completed counter")
+    metrics_lines.append(f"orchestrator_cycles_completed {status['cycles_completed']}")
+
+    metrics_lines.append("# HELP orchestrator_patterns_tested Patterns tested in current batch")
+    metrics_lines.append("# TYPE orchestrator_patterns_tested gauge")
+    metrics_lines.append(f"orchestrator_patterns_tested {status['patterns_tested']}")
+
+    metrics_lines.append("# HELP orchestrator_agents_tested Agents tested in current batch")
+    metrics_lines.append("# TYPE orchestrator_agents_tested gauge")
+    metrics_lines.append(f"orchestrator_agents_tested {status['agents_tested']}")
+
+    # Agent metrics
+    agent_result = await session.execute(
+        text("""
+            SELECT
+                COUNT(*) FILTER (WHERE is_active = true) as active,
+                COUNT(*) as total,
+                COALESCE(AVG(fitness_score) FILTER (WHERE is_active = true), 0) as avg_fitness,
+                COALESCE(MAX(fitness_score) FILTER (WHERE is_active = true), 0) as max_fitness
+            FROM agents
+        """)
+    )
+    agent_row = agent_result.fetchone()
+
+    metrics_lines.append("# HELP agents_active_total Number of active agents")
+    metrics_lines.append("# TYPE agents_active_total gauge")
+    metrics_lines.append(f"agents_active_total {agent_row[0] if agent_row else 0}")
+
+    metrics_lines.append("# HELP agents_total Total number of agents")
+    metrics_lines.append("# TYPE agents_total gauge")
+    metrics_lines.append(f"agents_total {agent_row[1] if agent_row else 0}")
+
+    metrics_lines.append("# HELP agents_fitness_avg Average fitness score of active agents")
+    metrics_lines.append("# TYPE agents_fitness_avg gauge")
+    metrics_lines.append(f"agents_fitness_avg {float(agent_row[2]) if agent_row else 0:.4f}")
+
+    metrics_lines.append("# HELP agents_fitness_max Maximum fitness score")
+    metrics_lines.append("# TYPE agents_fitness_max gauge")
+    metrics_lines.append(f"agents_fitness_max {float(agent_row[3]) if agent_row else 0:.4f}")
+
+    # Pattern metrics
+    pattern_result = await session.execute(
+        text("""
+            SELECT
+                COUNT(*) FILTER (WHERE is_active = true) as active,
+                COUNT(*) as total,
+                COALESCE(AVG(fitness_score) FILTER (WHERE is_active = true AND fitness_score IS NOT NULL), 0) as avg_fitness
+            FROM patterns
+        """)
+    )
+    pattern_row = pattern_result.fetchone()
+
+    metrics_lines.append("# HELP patterns_active_total Number of active patterns")
+    metrics_lines.append("# TYPE patterns_active_total gauge")
+    metrics_lines.append(f"patterns_active_total {pattern_row[0] if pattern_row else 0}")
+
+    metrics_lines.append("# HELP patterns_total Total number of patterns")
+    metrics_lines.append("# TYPE patterns_total gauge")
+    metrics_lines.append(f"patterns_total {pattern_row[1] if pattern_row else 0}")
+
+    metrics_lines.append("# HELP patterns_fitness_avg Average fitness score of active patterns")
+    metrics_lines.append("# TYPE patterns_fitness_avg gauge")
+    metrics_lines.append(f"patterns_fitness_avg {float(pattern_row[2]) if pattern_row else 0:.4f}")
+
+    # Trade metrics
+    trade_result = await session.execute(
+        text("""
+            SELECT
+                COUNT(*) as total_trades,
+                COUNT(*) FILTER (WHERE is_winner = true) as winning_trades
+            FROM backtest_trades_unified
+        """)
+    )
+    trade_row = trade_result.fetchone()
+
+    metrics_lines.append("# HELP backtest_trades_total Total backtest trades")
+    metrics_lines.append("# TYPE backtest_trades_total counter")
+    metrics_lines.append(f"backtest_trades_total {trade_row[0] if trade_row else 0}")
+
+    metrics_lines.append("# HELP backtest_trades_winning Total winning trades")
+    metrics_lines.append("# TYPE backtest_trades_winning counter")
+    metrics_lines.append(f"backtest_trades_winning {trade_row[1] if trade_row else 0}")
+
+    return Response(
+        content="\n".join(metrics_lines) + "\n",
+        media_type="text/plain; version=0.0.4; charset=utf-8"
+    )

@@ -285,6 +285,8 @@ async def persist_backtest_trades(
                     # MFE/MAE
                     mfe_pct=record.mfe_pct,
                     mae_pct=record.mae_pct,
+                    mfe_price=getattr(record, "mfe_price", None),
+                    mae_price=getattr(record, "mae_price", None),
                     # Decision zone tracking
                     entry_confidence=getattr(record, "entry_confidence", None),
                     decision_zone=getattr(record, "decision_zone", None),

@@ -631,8 +631,22 @@ async def spawn_child_and_persist(
     parent_b_id: str,
     mutation_rate: float = 0.10,
     seed: int | None = None,
+    inherit_memories: bool = True,
 ) -> str:
-    """Spawn child from two parents and persist."""
+    """
+    Spawn child from two parents and persist.
+
+    Args:
+        session: Database session
+        parent_a_id: First parent agent ID
+        parent_b_id: Second parent agent ID
+        mutation_rate: Trait mutation rate (0-1)
+        seed: Random seed for reproducibility
+        inherit_memories: Whether to inherit memories from parents
+
+    Returns:
+        Child agent ID
+    """
     from Fast_Swarm.Agents.Models.agent_models import Agent
 
     result_a = await session.execute(select(Agent).where(Agent.agent_id == parent_a_id))
@@ -674,7 +688,39 @@ async def spawn_child_and_persist(
         elo_rating=1500.0,
     )
     session.add(agent)
+
+    # LEVEL UP: Both parents level up when spawning a child
+    # This drives progression toward Crucible (level 15+)
+    parent_a.level = (parent_a.level or 0) + 1
+    parent_b.level = (parent_b.level or 0) + 1
+    session.add(parent_a)
+    session.add(parent_b)
+
     await session.flush()
+
+    # MEMORY INHERITANCE: Inherit memories from both parents
+    if inherit_memories:
+        try:
+            from .memory_integration_service import inherit_memories_from_both_parents
+
+            # Get condensation rate from child traits (controls how selective memory inheritance is)
+            condensation_rate = clean_traits.get("memory_condensation", 0.5)
+            decay_rate = clean_traits.get("inheritance_decay", 0.2)
+
+            inherited_count = await inherit_memories_from_both_parents(
+                session=session,
+                parent_a_id=parent_a_id,
+                parent_b_id=parent_b_id,
+                child_id=child.agent_id,
+                condensation_rate=condensation_rate,
+                decay_rate=decay_rate,
+            )
+            if inherited_count > 0:
+                print(f"[Spawn] Child {child.agent_id[:8]} inherited {inherited_count} memories from parents")
+        except Exception as e:
+            # Don't fail spawn if memory inheritance fails
+            print(f"[Spawn] Memory inheritance failed for {child.agent_id[:8]}: {e}")
+
     return child.agent_id
 
 
@@ -799,8 +845,21 @@ class AgentSpawnService:
         parent_id: str,
         mutation_rate: float = 0.10,
         seed: int | None = None,
+        inherit_memories: bool = True,
     ) -> str:
-        """Spawn a clone from a single parent with mutation."""
+        """
+        Spawn a clone from a single parent with mutation.
+
+        Args:
+            session: Database session
+            parent_id: Parent agent ID to clone
+            mutation_rate: Trait mutation rate (0-1)
+            seed: Random seed for reproducibility
+            inherit_memories: Whether to inherit memories from parent
+
+        Returns:
+            Clone agent ID
+        """
         from Fast_Swarm.Agents.Models.agent_models import Agent
 
         result = await session.execute(select(Agent).where(Agent.agent_id == parent_id))
@@ -836,5 +895,34 @@ class AgentSpawnService:
             elo_rating=1500.0,
         )
         session.add(agent)
+
+        # LEVEL UP: Parent levels up when spawning a clone
+        # This drives progression toward Crucible (level 15+)
+        parent.level = (parent.level or 0) + 1
+        session.add(parent)
+
         await session.flush()
+
+        # MEMORY INHERITANCE: Inherit memories from parent
+        if inherit_memories:
+            try:
+                from .memory_integration_service import inherit_memories_on_spawn
+
+                # Get condensation rate from clone traits
+                condensation_rate = clean_traits.get("memory_condensation", 0.5)
+                decay_rate = clean_traits.get("inheritance_decay", 0.2)
+
+                inherited_count = await inherit_memories_on_spawn(
+                    session=session,
+                    parent_id=parent_id,
+                    child_id=clone.agent_id,
+                    condensation_rate=condensation_rate,
+                    decay_rate=decay_rate,
+                )
+                if inherited_count > 0:
+                    print(f"[Spawn] Clone {clone.agent_id[:8]} inherited {inherited_count} memories from parent")
+            except Exception as e:
+                # Don't fail spawn if memory inheritance fails
+                print(f"[Spawn] Memory inheritance failed for clone {clone.agent_id[:8]}: {e}")
+
         return clone.agent_id

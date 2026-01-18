@@ -26,6 +26,6 @@ class ExchangeService:
 
     async def get_active_market_states(self, session: AsyncSession) -> list[ExchangeState]:
         """Get all currently active market states."""
-        statement = select(ExchangeState).where(ExchangeState.is_trading == True)
+        statement = select(ExchangeState).where(ExchangeState.is_trading.is_(True))
         result = await session.exec(statement)
         return result.all()

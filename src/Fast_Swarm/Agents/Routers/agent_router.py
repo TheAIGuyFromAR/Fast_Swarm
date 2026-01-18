@@ -8,7 +8,7 @@ from ..Services import agent_service
 router = APIRouter(prefix="/agents", tags=["Agents"])
 
 
-@router.get("/", response_model=list[Agent])
+@router.get("", response_model=list[Agent])
 async def read_agents(skip: int = 0, limit: int = 100, session: AsyncSession = Depends(get_session)):
     """
     Get all active agents.

@@ -1,0 +1,28 @@
+{
+  "agent_id": "canonical-high_frequency-555",
+  "trait_hash": "4a56d1d0752a87b6e833260e3b8ea3b86138c8a16d2b2e752277f1e1dcdfdb3a",
+  "traits": {
+    "adaptability": 0.5957353398295598,
+    "breakout_preference": 0.2572630190191245,
+    "correlation_awareness": 0.12494957510724769,
+    "drawdown_sensitivity": 0.411760860621705,
+    "entry_aggression": 0.95,
+    "exit_aggression": 0.95,
+    "funding_rate_sensitivity": 0.676650113238651,
+    "hold_duration_bias": 0.1,
+    "lookback_preference": 0.1265425874472349,
+    "mean_reversion": 0.4141353562233857,
+    "momentum_vs_reversion": 0.5482825615636386,
+    "news_reactivity": 0.48615844877274617,
+    "patience": 0.1,
+    "profit_target_greed": 0.2,
+    "risk_tolerance": 0.19334525074470776,
+    "sentiment_contrarian": 0.042075277161619185,
+    "sentiment_weight": 0.03474377755093139,
+    "stop_loss_tightness": 0.9,
+    "trend_following": 0.8635794276676139,
+    "volatility_seeking": 0.5612225436326006,
+    "volume_sensitivity": 0.3231078769838083,
+    "win_rate_preference": 0.15339718949365333
+  }
+}

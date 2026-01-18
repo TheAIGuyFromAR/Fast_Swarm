@@ -557,3 +557,223 @@ async def _run_migrations(conn):
             print("[DB] Backfill ON CONFLICT will fail until duplicates are removed")
         else:
             print(f"[DB] Index creation error: {e}")
+
+    # Performance indexes for candle lookups (10-50x faster queries)
+    await conn.execute(
+        text("""
+        CREATE INDEX IF NOT EXISTS idx_enhanced_candles_symbol_tf_time
+        ON enhanced_candles(symbol, timeframe, time DESC)
+    """)
+    )
+
+    # Agent backtest window detection index
+    await conn.execute(
+        text("""
+        CREATE INDEX IF NOT EXISTS idx_backtest_trades_agent_window
+        ON backtest_trades_unified(agent_id, symbol, timeframe, entry_timestamp)
+    """)
+    )
+
+    # GIN index for JSONB pattern queries on agents
+    await conn.execute(
+        text("""
+        CREATE INDEX IF NOT EXISTS idx_agents_assigned_patterns_gin
+        ON agents USING GIN(assigned_patterns)
+    """)
+    )
+
+    # Composite index for pattern priority queue (discovery service)
+    await conn.execute(
+        text("""
+        CREATE INDEX IF NOT EXISTS idx_patterns_priority_backtest
+        ON patterns(is_active, priority DESC NULLS LAST, last_backtest_at ASC NULLS FIRST)
+    """)
+    )
+
+    # Composite index for active patterns with fitness (stats service)
+    await conn.execute(
+        text("""
+        CREATE INDEX IF NOT EXISTS idx_patterns_active_fitness
+        ON patterns(is_active, fitness_score DESC NULLS LAST)
+    """)
+    )
+
+    # Partial index for active agents only (faster evolution queries)
+    await conn.execute(
+        text("""
+        CREATE INDEX IF NOT EXISTS idx_agents_active_only
+        ON agents(fitness_score DESC NULLS LAST) WHERE status = 'active'
+    """)
+    )
+
+    # Materialized view for fast time range lookups (avoids full table scan)
+    await conn.execute(
+        text("""
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_matviews WHERE matviewname = 'asset_timeframe_ranges'
+            ) THEN
+                CREATE MATERIALIZED VIEW asset_timeframe_ranges AS
+                SELECT symbol, timeframe,
+                       EXTRACT(EPOCH FROM MIN(time)) * 1000 as min_ts,
+                       EXTRACT(EPOCH FROM MAX(time)) * 1000 as max_ts,
+                       COUNT(*) as candle_count
+                FROM enhanced_candles
+                GROUP BY symbol, timeframe;
+
+                CREATE UNIQUE INDEX ON asset_timeframe_ranges(symbol, timeframe);
+            END IF;
+        END $$
+    """)
+    )
+    print("[DB] Performance indexes created")
+
+    # Migration: Fix stale pattern fitness values
+    # Patterns with non-zero fitness but 0 trades/ROI/win_rate are stale - reset to NULL
+    result = await conn.execute(
+        text("""
+            UPDATE patterns
+            SET fitness_score = NULL
+            WHERE fitness_score IS NOT NULL
+              AND fitness_score > 0
+              AND (total_trades IS NULL OR total_trades = 0)
+              AND (total_roi_pct IS NULL OR total_roi_pct = 0)
+              AND (win_rate IS NULL OR win_rate = 0)
+            RETURNING pattern_id
+        """)
+    )
+    rows = result.fetchall()
+    if rows:
+        print(f"[DB] Fixed {len(rows)} patterns with stale fitness values (reset to NULL)")
+
+    # Migration: Add derived/computed indicator columns to enhanced_candles
+    # These are precomputed for fast pattern matching (previously computed on-the-fly)
+    await conn.execute(
+        text("""
+        DO $$
+        BEGIN
+            -- MA Cross signals
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'enhanced_candles' AND column_name = 'ma_cross_20_50') THEN
+                ALTER TABLE enhanced_candles ADD COLUMN ma_cross_20_50 INTEGER;
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'enhanced_candles' AND column_name = 'golden_cross') THEN
+                ALTER TABLE enhanced_candles ADD COLUMN golden_cross INTEGER;
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'enhanced_candles' AND column_name = 'death_cross') THEN
+                ALTER TABLE enhanced_candles ADD COLUMN death_cross INTEGER;
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'enhanced_candles' AND column_name = 'macd_cross') THEN
+                ALTER TABLE enhanced_candles ADD COLUMN macd_cross INTEGER;
+            END IF;
+
+            -- Price vs MA percentages
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'enhanced_candles' AND column_name = 'price_vs_ema_9_pct') THEN
+                ALTER TABLE enhanced_candles ADD COLUMN price_vs_ema_9_pct DOUBLE PRECISION;
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'enhanced_candles' AND column_name = 'price_vs_ema_20_pct') THEN
+                ALTER TABLE enhanced_candles ADD COLUMN price_vs_ema_20_pct DOUBLE PRECISION;
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'enhanced_candles' AND column_name = 'price_vs_ema_21_pct') THEN
+                ALTER TABLE enhanced_candles ADD COLUMN price_vs_ema_21_pct DOUBLE PRECISION;
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'enhanced_candles' AND column_name = 'price_vs_sma_50_pct') THEN
+                ALTER TABLE enhanced_candles ADD COLUMN price_vs_sma_50_pct DOUBLE PRECISION;
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'enhanced_candles' AND column_name = 'price_vs_sma_200_pct') THEN
+                ALTER TABLE enhanced_candles ADD COLUMN price_vs_sma_200_pct DOUBLE PRECISION;
+            END IF;
+
+            -- Price above MA booleans
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'enhanced_candles' AND column_name = 'price_above_ema_9') THEN
+                ALTER TABLE enhanced_candles ADD COLUMN price_above_ema_9 INTEGER;
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'enhanced_candles' AND column_name = 'price_above_ema_20') THEN
+                ALTER TABLE enhanced_candles ADD COLUMN price_above_ema_20 INTEGER;
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'enhanced_candles' AND column_name = 'price_above_ema_21') THEN
+                ALTER TABLE enhanced_candles ADD COLUMN price_above_ema_21 INTEGER;
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'enhanced_candles' AND column_name = 'price_above_sma_50') THEN
+                ALTER TABLE enhanced_candles ADD COLUMN price_above_sma_50 INTEGER;
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'enhanced_candles' AND column_name = 'price_above_sma_200') THEN
+                ALTER TABLE enhanced_candles ADD COLUMN price_above_sma_200 INTEGER;
+            END IF;
+
+            -- RSI conditions
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'enhanced_candles' AND column_name = 'rsi_oversold') THEN
+                ALTER TABLE enhanced_candles ADD COLUMN rsi_oversold INTEGER;
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'enhanced_candles' AND column_name = 'rsi_overbought') THEN
+                ALTER TABLE enhanced_candles ADD COLUMN rsi_overbought INTEGER;
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'enhanced_candles' AND column_name = 'rsi_neutral') THEN
+                ALTER TABLE enhanced_candles ADD COLUMN rsi_neutral INTEGER;
+            END IF;
+
+            -- Stochastic conditions
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'enhanced_candles' AND column_name = 'stoch_oversold') THEN
+                ALTER TABLE enhanced_candles ADD COLUMN stoch_oversold INTEGER;
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'enhanced_candles' AND column_name = 'stoch_overbought') THEN
+                ALTER TABLE enhanced_candles ADD COLUMN stoch_overbought INTEGER;
+            END IF;
+
+            -- Trend conditions
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'enhanced_candles' AND column_name = 'strong_trend') THEN
+                ALTER TABLE enhanced_candles ADD COLUMN strong_trend INTEGER;
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'enhanced_candles' AND column_name = 'weak_trend') THEN
+                ALTER TABLE enhanced_candles ADD COLUMN weak_trend INTEGER;
+            END IF;
+
+            -- Regime indicators
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'enhanced_candles' AND column_name = 'volatility_regime') THEN
+                ALTER TABLE enhanced_candles ADD COLUMN volatility_regime VARCHAR(20);
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'enhanced_candles' AND column_name = 'trend_regime') THEN
+                ALTER TABLE enhanced_candles ADD COLUMN trend_regime VARCHAR(20);
+            END IF;
+
+            -- Session indicators
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'enhanced_candles' AND column_name = 'is_asian_session') THEN
+                ALTER TABLE enhanced_candles ADD COLUMN is_asian_session INTEGER;
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'enhanced_candles' AND column_name = 'is_london_session') THEN
+                ALTER TABLE enhanced_candles ADD COLUMN is_london_session INTEGER;
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'enhanced_candles' AND column_name = 'is_us_session') THEN
+                ALTER TABLE enhanced_candles ADD COLUMN is_us_session INTEGER;
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'enhanced_candles' AND column_name = 'is_us_market_hours') THEN
+                ALTER TABLE enhanced_candles ADD COLUMN is_us_market_hours INTEGER;
+            END IF;
+
+            -- Bollinger conditions
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'enhanced_candles' AND column_name = 'price_at_bb_upper') THEN
+                ALTER TABLE enhanced_candles ADD COLUMN price_at_bb_upper INTEGER;
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'enhanced_candles' AND column_name = 'price_at_bb_lower') THEN
+                ALTER TABLE enhanced_candles ADD COLUMN price_at_bb_lower INTEGER;
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'enhanced_candles' AND column_name = 'bb_squeeze') THEN
+                ALTER TABLE enhanced_candles ADD COLUMN bb_squeeze INTEGER;
+            END IF;
+
+            -- Volume conditions
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'enhanced_candles' AND column_name = 'high_volume') THEN
+                ALTER TABLE enhanced_candles ADD COLUMN high_volume INTEGER;
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'enhanced_candles' AND column_name = 'low_volume') THEN
+                ALTER TABLE enhanced_candles ADD COLUMN low_volume INTEGER;
+            END IF;
+
+            -- Metadata
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'enhanced_candles' AND column_name = 'derived_computed_at') THEN
+                ALTER TABLE enhanced_candles ADD COLUMN derived_computed_at TIMESTAMPTZ;
+            END IF;
+        END $$;
+    """)
+    )
+    print("[DB] Derived indicator columns added to enhanced_candles")

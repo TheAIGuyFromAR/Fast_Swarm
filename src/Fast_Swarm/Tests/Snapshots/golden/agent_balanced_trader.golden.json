@@ -1,0 +1,28 @@
+{
+  "agent_id": "canonical-balanced_trader-42",
+  "trait_hash": "2add16c24e3c289ead9323025b106e35aa0cb1c634b3ae1fe9adcd02e42a7297",
+  "traits": {
+    "adaptability": 0.5892656838759087,
+    "breakout_preference": 0.8058192518328079,
+    "correlation_awareness": 0.5449414806032167,
+    "drawdown_sensitivity": 0.6766994874229113,
+    "entry_aggression": 0.4219218196852704,
+    "exit_aggression": 0.029797219438070344,
+    "funding_rate_sensitivity": 0.6498844377795232,
+    "hold_duration_bias": 0.025010755222666936,
+    "lookback_preference": 0.21863797480360336,
+    "mean_reversion": 0.006498759678061017,
+    "momentum_vs_reversion": 0.8921795677048454,
+    "news_reactivity": 0.026535969683863625,
+    "patience": 0.2204406220406967,
+    "profit_target_greed": 0.22321073814882275,
+    "risk_tolerance": 0.6394267984578837,
+    "sentiment_contrarian": 0.1988376506866485,
+    "sentiment_weight": 0.5053552881033624,
+    "stop_loss_tightness": 0.08693883262941615,
+    "trend_following": 0.8094304566778266,
+    "volatility_seeking": 0.27502931836911926,
+    "volume_sensitivity": 0.6981393949882269,
+    "win_rate_preference": 0.7364712141640124
+  }
+}

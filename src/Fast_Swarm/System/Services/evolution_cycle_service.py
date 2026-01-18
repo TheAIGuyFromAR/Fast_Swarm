@@ -283,7 +283,7 @@ class EvolutionCycleService:
                 print("[EvolutionCycle] Fallback: Using quintile-based patterns")
                 from ...Patterns.Models.pattern_models import Pattern
 
-                pattern_result = await session.exec(select(Pattern).where(Pattern.is_active == True))
+                pattern_result = await session.exec(select(Pattern).where(Pattern.is_active.is_(True)))
                 all_patterns = pattern_result.all()
 
                 # Convert to dicts and calculate quintile tiers
@@ -398,7 +398,7 @@ class EvolutionCycleService:
 
         from ...Patterns.Models.pattern_models import Pattern
 
-        pattern_result = await session.exec(select(Pattern).where(Pattern.is_active == True))
+        pattern_result = await session.exec(select(Pattern).where(Pattern.is_active.is_(True)))
         active_patterns = pattern_result.all()
         pattern_ids = [p.pattern_id for p in active_patterns]
 

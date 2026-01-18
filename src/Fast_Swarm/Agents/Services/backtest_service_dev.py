@@ -324,7 +324,7 @@ class AgentBacktestServiceDev:
         # 3. Load patterns
         from ...Patterns.Models.pattern_models import Pattern
 
-        pattern_result = await session.exec(select(Pattern).where(Pattern.is_active == True))
+        pattern_result = await session.exec(select(Pattern).where(Pattern.is_active.is_(True)))
         patterns = pattern_result.all()
         pattern_lookup = {
             p.pattern_id: {
@@ -388,7 +388,7 @@ class AgentBacktestServiceDev:
             # Persist trades
             if res.get("trades"):
                 try:
-                    await persist_trades(session, res["trades"], "evolution_backtest_dev", timeframe)
+                    await persist_trades(session, res["trades"], "evolution_backtest_dev", timeframe, fetch_indicators=True)
                 except Exception as e:
                     print(f"[BacktestDev] Trade persist error: {e}")
 
