@@ -53,7 +53,7 @@ async def compute_derived_indicators_batch(
     Returns:
         Number of rows updated
     """
-    # Build WHERE clause for filtering
+    # Build WHERE clause for filtering - use direct UPDATE (faster on compressed hypertables)
     where_clauses = ["derived_computed_at IS NULL"]
     if symbol:
         where_clauses.append(f"symbol = '{symbol}'")
@@ -61,12 +61,11 @@ async def compute_derived_indicators_batch(
         where_clauses.append(f"timeframe = '{timeframe}'")
 
     where_sql = " AND ".join(where_clauses)
-    limit_sql = f"LIMIT {limit}" if limit else ""
 
-    # SQL to compute all derived indicators in one pass
-    # This is MUCH faster than Python loops - let PostgreSQL do the work
+    # Direct UPDATE without subquery - much faster on TimescaleDB compressed hypertables
+    # The correlated subquery approach causes full table scans due to decompression
     update_sql = text(f"""
-        UPDATE enhanced_candles ec
+        UPDATE enhanced_candles
         SET
             -- MA Cross signals (1 = bullish, -1 = bearish, 0 = neutral)
             ma_cross_20_50 = CASE
@@ -164,11 +163,10 @@ async def compute_derived_indicators_batch(
             END,
 
             -- Session indicators (based on hour of candle timestamp)
-            -- Note: Must use ec.time to avoid ambiguity with batch.time
-            is_asian_session = CASE WHEN EXTRACT(HOUR FROM ec.time) >= 0 AND EXTRACT(HOUR FROM ec.time) < 8 THEN 1 ELSE 0 END,
-            is_london_session = CASE WHEN EXTRACT(HOUR FROM ec.time) >= 8 AND EXTRACT(HOUR FROM ec.time) < 16 THEN 1 ELSE 0 END,
-            is_us_session = CASE WHEN EXTRACT(HOUR FROM ec.time) >= 13 AND EXTRACT(HOUR FROM ec.time) < 21 THEN 1 ELSE 0 END,
-            is_us_market_hours = CASE WHEN EXTRACT(HOUR FROM ec.time) >= 14 AND EXTRACT(HOUR FROM ec.time) < 21 THEN 1 ELSE 0 END,
+            is_asian_session = CASE WHEN EXTRACT(HOUR FROM time) >= 0 AND EXTRACT(HOUR FROM time) < 8 THEN 1 ELSE 0 END,
+            is_london_session = CASE WHEN EXTRACT(HOUR FROM time) >= 8 AND EXTRACT(HOUR FROM time) < 16 THEN 1 ELSE 0 END,
+            is_us_session = CASE WHEN EXTRACT(HOUR FROM time) >= 13 AND EXTRACT(HOUR FROM time) < 21 THEN 1 ELSE 0 END,
+            is_us_market_hours = CASE WHEN EXTRACT(HOUR FROM time) >= 14 AND EXTRACT(HOUR FROM time) < 21 THEN 1 ELSE 0 END,
 
             -- Bollinger conditions
             price_at_bb_upper = CASE WHEN bb_upper IS NOT NULL THEN CASE WHEN close >= bb_upper THEN 1 ELSE 0 END ELSE NULL END,
@@ -190,17 +188,7 @@ async def compute_derived_indicators_batch(
             -- Mark as computed
             derived_computed_at = NOW()
 
-        FROM (
-            SELECT time, exchange, symbol, timeframe
-            FROM enhanced_candles
-            WHERE {where_sql}
-            ORDER BY time
-            {limit_sql}
-        ) AS batch
-        WHERE ec.time = batch.time
-          AND ec.exchange = batch.exchange
-          AND ec.symbol = batch.symbol
-          AND ec.timeframe = batch.timeframe
+        WHERE {where_sql}
     """)
 
     result = await session.execute(update_sql)
