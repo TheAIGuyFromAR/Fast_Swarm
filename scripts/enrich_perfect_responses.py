@@ -8,9 +8,9 @@ with real correlations from the data.
 """
 
 import json
-from pathlib import Path
-from collections import defaultdict
 import statistics
+from collections import defaultdict
+from pathlib import Path
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 INPUT_FILE = DATA_DIR / "ai_training_data.jsonl"
@@ -239,7 +239,7 @@ def main():
               f"avg MFE {stats['avg_mfe']:.2f}%, win rate {stats['win_rate']:.0f}%")
 
     # Enrich records with new perfect_response
-    print(f"\nEnriching records...")
+    print("\nEnriching records...")
     enriched = []
     for record in records:
         record["perfect_response"] = generate_rich_response(record, cluster_stats)
@@ -261,7 +261,7 @@ def main():
     print(f"Symbol: {sample['symbol']}")
     print(f"Correct choice: {sample['correct_choice']}")
     print(f"Entry indicators: {sample['entry_indicators']}")
-    print(f"\nPerfect response reasoning:")
+    print("\nPerfect response reasoning:")
     print(sample["perfect_response"]["reasoning"])
 
 

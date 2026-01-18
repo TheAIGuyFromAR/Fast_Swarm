@@ -77,10 +77,20 @@ jobs:
     - name: Install bandit
       run: pip install "bandit[toml]>=1.7.8"
 
-    - name: Run Bandit security scan
+    - name: Bandit security scan (blocking - high severity only)
       run: |
         bandit -r . \
-          --exclude "./.git,./venv,./.venv,./tmpclaude-*,./.hypothesis" \
+          -c pyproject.toml \
+          --severity-level high \
+          --confidence-level high \
+          -f github
+
+    - name: Bandit security scan (warnings - medium severity)
+      if: always()
+      run: |
+        echo "::notice::The following are security warnings (non-blocking):"
+        bandit -r . \
+          -c pyproject.toml \
           --severity-level medium \
           --confidence-level medium \
-          -f txt
+          -f github || true

@@ -5,7 +5,6 @@ Source of truth: Master_plan.md (Backtest System)
 Backtests run patterns against real OHLCV data with trait-derived parameters.
 """
 
-import pytest
 
 from Fast_Swarm.Backtest.Models.backtest_models import (
     BacktestConfig,

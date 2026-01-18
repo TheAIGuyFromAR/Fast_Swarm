@@ -12,10 +12,10 @@ Uses ALL available indicators and finds correlations.
 """
 
 import json
-import psycopg2
 import statistics
 from pathlib import Path
-from collections import defaultdict
+
+import psycopg2
 
 # Key indicators to include in examples (most relevant for trading)
 KEY_INDICATORS = [

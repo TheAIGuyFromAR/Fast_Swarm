@@ -28,6 +28,24 @@ from sqlalchemy import and_, select, text
 from Fast_Swarm.Infrastructure.Models.market_data_models import BacktestWindow
 
 
+def extend_pool(failures: list, seed: int | None = None) -> dict:
+    """
+    Extend pool to fix coverage gaps.
+
+    TODO: Implement this function to add windows for pairs below coverage targets.
+
+    Args:
+        failures: List of (symbol, timeframe) pairs below targets
+        seed: Random seed for reproducibility
+
+    Returns:
+        Dict with windows_added and pairs_fixed counts
+    """
+    # Stub implementation - logs warning and returns empty result
+    print(f"[WARNING] extend_pool not fully implemented, {len(failures)} failures unaddressed")
+    return {"windows_added": 0, "pairs_fixed": 0}
+
+
 @dataclass(frozen=True)
 class Window:
     """Immutable backtest window specification."""

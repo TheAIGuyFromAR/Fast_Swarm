@@ -8,6 +8,7 @@ Patterns match against OHLCV + indicators. Evolution discovers boundaries.
 import time
 
 import pytest
+
 from Fast_Swarm.Patterns.Services.pattern_matching_service import (
     INDICATOR_BOUNDS,
     INDICATORS,

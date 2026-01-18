@@ -325,7 +325,7 @@ class BacktestOrchestrator:
 
                     return {"status": "ok", "trades": trades}
 
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     self.state.patterns_skipped_timeout += 1
                     self.state.last_progress_at = datetime.utcnow()  # Timeout is still progress
                     print(f"[Orchestrator] TIMEOUT: Pattern {pattern.pattern_id[:8]} exceeded {self.PATTERN_TIMEOUT_SECONDS}s")

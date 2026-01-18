@@ -17,6 +17,7 @@ Features:
 import math
 import re
 from dataclasses import dataclass
+from datetime import UTC
 
 from Fast_Swarm.local_agents.shared.confidence import (
     evaluate_condition_confidence,
@@ -330,26 +331,23 @@ INDICATOR_ALIASES = {
     "day": "day_of_week",
     "isMonday": "is_monday",
     "isThursday": "is_thursday",
-    "isUSMarketHours": "is_us_market_hours",
+    # NOTE: isUSMarketHours defined above in precomputed section (line 236)
     "isUsMarketHours": "is_us_market_hours",
     # =========================================================================
-    # Regime Indicators
+    # Regime Indicators (generic fallback - specific ones defined above)
     # =========================================================================
-    "volatilityRegime": "regime",
-    "trendRegime": "regime",
     "regime": "regime",
+    # NOTE: volatilityRegime/trendRegime defined above with specific columns
     # =========================================================================
     # BIAS indicator
     # =========================================================================
     "BIAS_26": "bias_26",
     "BIAS_SMA_26": "bias_26",
-    "maCross": "bias_26",
+    # NOTE: maCross defined above -> ma_cross_20_50 (precomputed)
     # =========================================================================
-    # Cross signals (computed - use histogram as proxy)
+    # Cross signals - NOTE: specific mappings defined above in precomputed section
+    # These fallback comments kept for reference but duplicates removed
     # =========================================================================
-    "deathCross": "macd_histogram",
-    "goldenCross": "macd_histogram",
-    "macdBullishCross": "macd_histogram",
     "macdBearishCross": "macd_histogram",
     # =========================================================================
     # Volatility proxies
@@ -749,11 +747,11 @@ def compute_derived_indicator(
     # ==========================================================================
     timestamp = indicators.get("timestamp")
     if timestamp is not None:
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         try:
             # Convert timestamp (ms) to datetime
-            dt = datetime.fromtimestamp(timestamp / 1000, tz=timezone.utc)
+            dt = datetime.fromtimestamp(timestamp / 1000, tz=UTC)
             hour = dt.hour
             weekday = dt.weekday()  # 0=Monday, 6=Sunday
 

@@ -290,7 +290,7 @@ async def lifespan(app: FastAPI):
             task.cancel()
             try:
                 await asyncio.wait_for(task, timeout=5.0)
-            except (asyncio.CancelledError, asyncio.TimeoutError):
+            except (TimeoutError, asyncio.CancelledError):
                 pass  # Expected during shutdown
     await stream_manager.stop()
     await data_collector.flush_all()  # Flush all pending data

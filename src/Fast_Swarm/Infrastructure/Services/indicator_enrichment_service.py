@@ -10,7 +10,6 @@ The indicators computed here match what patterns expect from COMPUTED_INDICATORS
 
 import asyncio
 import logging
-from datetime import UTC, datetime
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession

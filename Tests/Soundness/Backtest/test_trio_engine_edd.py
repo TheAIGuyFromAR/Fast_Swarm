@@ -14,12 +14,11 @@ Division Hotspots Tested:
 4. _to_btc: zero prices
 """
 
-from dataclasses import dataclass
 import math
+from dataclasses import dataclass
 from unittest.mock import MagicMock
 
 import pytest
-
 
 # =============================================================================
 # MOCK CLASSES - Isolate trio_engine logic from dependencies

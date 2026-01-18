@@ -43,12 +43,14 @@ get_pool_stats = windows_module.get_pool_stats
 
 # Load template
 from jinja2 import select_autoescape
+
 PROMPTS_DIR = Path(__file__).parent.parent / "local_agents" / "prompts"
 env = Environment(loader=FileSystemLoader(str(PROMPTS_DIR)), autoescape=select_autoescape())
 AI_TEMPLATE = env.get_template("ai_zone_decision.j2")
 
 # vLLM runs in WSL - use WSL IP (get dynamically or use localhost if WSL2 mirrored networking)
 import subprocess as _sp
+
 try:
     _wsl_ip = _sp.check_output(["wsl", "hostname", "-I"], text=True).strip().split()[0]
     VLLM_URL = f"http://{_wsl_ip}:8000"

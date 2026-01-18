@@ -20,7 +20,6 @@ from Fast_Swarm.logging_config_postgres import LogContext, ctx, get_logger
 
 from .base_ws import (
     BaseWebSocketClient,
-    BookTickerData,
     KlineData,
     MarkPriceData,
     NormalizedOrderBook,
