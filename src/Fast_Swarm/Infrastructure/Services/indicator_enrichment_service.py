@@ -228,6 +228,16 @@ async def run_enrichment(
     global_start = time.time()
 
     async with async_session_maker() as session:
+        # CRITICAL: Disable TimescaleDB decompression limit for this session
+        # The default limit (100k) is too low for our UPDATE queries on compressed hypertables.
+        # Even with batching and WHERE clauses, the UPDATE...FROM pattern causes TimescaleDB
+        # to decompress entire chunks looking for matching rows.
+        try:
+            await session.execute(text("SET timescaledb.max_tuples_decompressed_per_dml_transaction = 0"))
+            print("[Enrichment] TimescaleDB decompression limit disabled for session", flush=True)
+        except Exception as e:
+            print(f"[Enrichment] Warning: Could not set TimescaleDB limit: {e}", flush=True)
+
         # Get distinct symbol/timeframe combinations if not specified
         if not symbols or not timeframes:
             query = text("""

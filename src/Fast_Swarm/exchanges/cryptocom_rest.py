@@ -98,8 +98,12 @@ class CryptoComRESTClient:
         # Build signature payload
         sig_payload = f"{method}{self._request_id}{self.api_key}{param_string}{nonce}"
 
-        # Create HMAC-SHA256 signature
-        signature = hmac.new(
+        # Create HMAC-SHA256 signature for API request authentication
+        # Note: This is HMAC for message signing, NOT password hashing.
+        # HMAC-SHA256 is the industry standard for API authentication (used by AWS, Stripe, all exchanges).
+        # CodeQL py/weak-sensitive-data-hashing is a false positive here - api_secret is a
+        # pre-shared signing key, not a password being stored.
+        signature = hmac.new(  # noqa: S324
             self.api_secret.encode("utf-8"),
             sig_payload.encode("utf-8"),
             hashlib.sha256,
