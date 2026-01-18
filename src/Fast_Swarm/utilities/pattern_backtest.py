@@ -399,7 +399,12 @@ async def backtest_pattern_on_windows(
                     preloaded_candles=preloaded_candles,
                 )
 
-                trades = engine.run(
+                # Run engine in thread pool so it doesn't block the event loop
+                # This allows asyncio.wait_for() timeouts to actually work
+                import asyncio
+
+                trades = await asyncio.to_thread(
+                    engine.run,
                     agent=test_agent,
                     dataset={
                         "assets": [asset],

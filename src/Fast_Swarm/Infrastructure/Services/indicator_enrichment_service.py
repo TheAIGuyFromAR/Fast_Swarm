@@ -162,10 +162,11 @@ async def compute_derived_indicators_batch(
             END,
 
             -- Session indicators (based on hour of candle timestamp)
-            is_asian_session = CASE WHEN EXTRACT(HOUR FROM time) >= 0 AND EXTRACT(HOUR FROM time) < 8 THEN 1 ELSE 0 END,
-            is_london_session = CASE WHEN EXTRACT(HOUR FROM time) >= 8 AND EXTRACT(HOUR FROM time) < 16 THEN 1 ELSE 0 END,
-            is_us_session = CASE WHEN EXTRACT(HOUR FROM time) >= 13 AND EXTRACT(HOUR FROM time) < 21 THEN 1 ELSE 0 END,
-            is_us_market_hours = CASE WHEN EXTRACT(HOUR FROM time) >= 14 AND EXTRACT(HOUR FROM time) < 21 THEN 1 ELSE 0 END,
+            -- Note: Must use ec.time to avoid ambiguity with batch.time
+            is_asian_session = CASE WHEN EXTRACT(HOUR FROM ec.time) >= 0 AND EXTRACT(HOUR FROM ec.time) < 8 THEN 1 ELSE 0 END,
+            is_london_session = CASE WHEN EXTRACT(HOUR FROM ec.time) >= 8 AND EXTRACT(HOUR FROM ec.time) < 16 THEN 1 ELSE 0 END,
+            is_us_session = CASE WHEN EXTRACT(HOUR FROM ec.time) >= 13 AND EXTRACT(HOUR FROM ec.time) < 21 THEN 1 ELSE 0 END,
+            is_us_market_hours = CASE WHEN EXTRACT(HOUR FROM ec.time) >= 14 AND EXTRACT(HOUR FROM ec.time) < 21 THEN 1 ELSE 0 END,
 
             -- Bollinger conditions
             price_at_bb_upper = CASE WHEN bb_upper IS NOT NULL THEN CASE WHEN close >= bb_upper THEN 1 ELSE 0 END ELSE NULL END,
