@@ -121,8 +121,69 @@ class EnhancedCandle(SQLModel, table=True):
     eth_btc_ratio: float | None = None
     alt_dominance_pct: float | None = None
 
+    # ==========================================================================
+    # DERIVED/COMPUTED INDICATORS
+    # These are calculated from base indicators and stored for fast pattern matching.
+    # Previously computed on-the-fly during backtests (expensive), now precomputed.
+    # ==========================================================================
+
+    # MA Cross signals (1 = bullish cross, -1 = bearish cross, 0 = no cross)
+    ma_cross_20_50: int | None = None  # EMA 20 vs SMA 50
+    golden_cross: int | None = None  # SMA 50 vs SMA 200
+    death_cross: int | None = None  # SMA 50 vs SMA 200 (inverted)
+
+    # MACD Cross signals (1 = bullish, -1 = bearish, 0 = none)
+    macd_cross: int | None = None  # MACD line vs signal
+
+    # Price vs MA (percent difference)
+    price_vs_ema_9_pct: float | None = None
+    price_vs_ema_20_pct: float | None = None
+    price_vs_ema_21_pct: float | None = None
+    price_vs_sma_50_pct: float | None = None
+    price_vs_sma_200_pct: float | None = None
+
+    # Boolean conditions (stored as int: 1=true, 0=false)
+    price_above_ema_9: int | None = None
+    price_above_ema_20: int | None = None
+    price_above_ema_21: int | None = None
+    price_above_sma_50: int | None = None
+    price_above_sma_200: int | None = None
+
+    # RSI conditions (1=true, 0=false)
+    rsi_oversold: int | None = None  # RSI < 30
+    rsi_overbought: int | None = None  # RSI > 70
+    rsi_neutral: int | None = None  # 30 <= RSI <= 70
+
+    # Stochastic conditions
+    stoch_oversold: int | None = None  # K < 20
+    stoch_overbought: int | None = None  # K > 80
+
+    # Trend strength conditions
+    strong_trend: int | None = None  # ADX > 25
+    weak_trend: int | None = None  # ADX < 20
+
+    # Regime indicators (categorical stored as string)
+    volatility_regime: str | None = None  # "low", "medium", "high" based on NATR
+    trend_regime: str | None = None  # "uptrend", "downtrend", "sideways" based on MAs
+
+    # Session indicators (1=true, 0=false) - computed from candle timestamp
+    is_asian_session: int | None = None  # 00:00-08:00 UTC
+    is_london_session: int | None = None  # 08:00-16:00 UTC
+    is_us_session: int | None = None  # 13:00-21:00 UTC
+    is_us_market_hours: int | None = None  # 14:30-21:00 UTC (NYSE hours)
+
+    # Bollinger conditions
+    price_at_bb_upper: int | None = None  # Close >= BB upper
+    price_at_bb_lower: int | None = None  # Close <= BB lower
+    bb_squeeze: int | None = None  # BB width < threshold
+
+    # Volume conditions
+    high_volume: int | None = None  # Volume > 1.5x SMA(20)
+    low_volume: int | None = None  # Volume < 0.5x SMA(20)
+
     # Metadata
     enriched_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
+    derived_computed_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
 
 
 class Ticker(SQLModel, table=True):

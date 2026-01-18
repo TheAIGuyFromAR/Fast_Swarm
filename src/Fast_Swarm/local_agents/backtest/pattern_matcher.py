@@ -188,17 +188,61 @@ INDICATOR_ALIASES = {
     "wma10": "wma",
     "WMA_10": "wma",
     # =========================================================================
-    # Price vs MA (computed indicators - need special handling)
+    # PRECOMPUTED DERIVED INDICATORS (stored in DB - fastest path)
+    # These map to columns added by indicator_enrichment_service.py
     # =========================================================================
-    "priceVsEma10Pct": "ema_9",
-    "priceVsEma20Pct": "ema_21",
-    "priceVsEma50Pct": "sma_50",
-    "priceVsEma200Pct": "sma_200",
-    "priceVsSma20Pct": "sma_20",
-    "priceVsSma50Pct": "sma_50",
-    "priceVsSma200Pct": "sma_200",
-    "priceVsEma": "ema_21",
-    "priceVsSma": "sma_20",
+    # MA Cross signals (precomputed as integers: 1=bullish, -1=bearish, 0=neutral)
+    "maCross": "ma_cross_20_50",
+    "goldenCross": "golden_cross",
+    "deathCross": "death_cross",
+    "macdCross": "macd_cross",
+    "macdBullishCross": "macd_cross",  # Same column, check for > 0
+    # Price vs MA percentages (precomputed)
+    "priceVsEma9Pct": "price_vs_ema_9_pct",
+    "priceVsEma10Pct": "price_vs_ema_9_pct",  # Closest
+    "priceVsEma20Pct": "price_vs_ema_20_pct",
+    "priceVsEma21Pct": "price_vs_ema_21_pct",
+    "priceVsSma50Pct": "price_vs_sma_50_pct",
+    "priceVsSma200Pct": "price_vs_sma_200_pct",
+    "priceVsEma": "price_vs_ema_21_pct",
+    "priceVsSma": "price_vs_sma_50_pct",
+    # Price above MA booleans (precomputed as integers: 1=true, 0=false)
+    "priceAboveEma": "price_above_ema_21",
+    "priceAboveEma9": "price_above_ema_9",
+    "priceAboveEma20": "price_above_ema_20",
+    "priceAboveEma21": "price_above_ema_21",
+    "priceAboveSma50": "price_above_sma_50",
+    "priceAboveSma200": "price_above_sma_200",
+    "aboveEma": "price_above_ema_21",
+    "aboveSma": "price_above_sma_50",
+    # RSI conditions (precomputed as integers)
+    "rsiOversold": "rsi_oversold",
+    "rsiOverbought": "rsi_overbought",
+    "rsiNeutral": "rsi_neutral",
+    # Stochastic conditions (precomputed)
+    "stochOversold": "stoch_oversold",
+    "stochOverbought": "stoch_overbought",
+    # Trend conditions (precomputed)
+    "strongTrend": "strong_trend",
+    "weakTrend": "weak_trend",
+    # Regime indicators (precomputed as strings)
+    "volatilityRegime": "volatility_regime",
+    "trendRegime": "trend_regime",
+    # Session indicators (precomputed as integers)
+    "isAsianSession": "is_asian_session",
+    "isLondonSession": "is_london_session",
+    "isUSSession": "is_us_session",
+    "isUSMarketHours": "is_us_market_hours",
+    "isEuropeanSession": "is_london_session",  # Alias
+    # Bollinger conditions (precomputed)
+    "bbAtUpper": "price_at_bb_upper",
+    "bbAtLower": "price_at_bb_lower",
+    "bbSqueeze": "bb_squeeze",
+    # Volume conditions (precomputed)
+    "highVolume": "high_volume",
+    "volumeSpike": "high_volume",
+    "lowVolume": "low_volume",
+    "volumeDry": "low_volume",
     # =========================================================================
     # StochRSI
     # =========================================================================
@@ -386,7 +430,398 @@ COMPUTED_INDICATORS = {
     # Other computed
     "atrPercent",
     "stddev20",
+    # Time/Session indicators
+    "isAsianSession",
+    "isEuropeanSession",
+    "isUSMarketHours",
+    "isWeekend",
+    "isMonday",
+    "isTuesday",
+    "isWednesday",
+    "isThursday",
+    "isFriday",
+    # Regime indicators
+    "volatilityRegime",
+    "trendRegime",
 }
+
+
+def compute_derived_indicator(
+    name: str,
+    indicators: dict[str, float],
+    condition: dict | None = None,
+) -> float | None:
+    """
+    Compute derived/computed indicators that don't exist as DB columns.
+
+    These indicators are calculated on-the-fly from other indicator values.
+
+    Args:
+        name: Indicator name (e.g., "maCross", "priceAboveEma")
+        indicators: Dict of available indicator values
+        condition: Optional condition dict with params (e.g., fastPeriod, slowPeriod)
+
+    Returns:
+        Computed value, or None if cannot be computed
+    """
+    close = indicators.get("close", 0)
+
+    # Extract params from condition if available
+    params = condition.get("params", {}) if condition else {}
+
+    # ==========================================================================
+    # MA Cross indicators - return 1 (bullish cross), -1 (bearish cross), or 0
+    # ==========================================================================
+    if name == "maCross":
+        # Get MA periods from params
+        fast_period = params.get("fastPeriod", 20)
+        slow_period = params.get("slowPeriod", 50)
+        fast_type = params.get("fastType", "ema").lower()
+        slow_type = params.get("slowType", "sma").lower()
+
+        # Build column names
+        fast_col = f"{fast_type}_{fast_period}"
+        slow_col = f"{slow_type}_{slow_period}"
+
+        # Try to resolve columns
+        fast_val = indicators.get(fast_col) or indicators.get(f"ema_{fast_period}") or indicators.get(f"sma_{fast_period}")
+        slow_val = indicators.get(slow_col) or indicators.get(f"ema_{slow_period}") or indicators.get(f"sma_{slow_period}")
+
+        if fast_val is not None and slow_val is not None:
+            # Return relative position: positive = fast above slow, negative = fast below
+            if fast_val > slow_val:
+                return 1  # Bullish
+            elif fast_val < slow_val:
+                return -1  # Bearish
+            return 0
+        return None
+
+    if name == "goldenCross":
+        # SMA 50 crosses above SMA 200
+        sma50 = indicators.get("sma_50")
+        sma200 = indicators.get("sma_200")
+        if sma50 is not None and sma200 is not None:
+            return 1 if sma50 > sma200 else 0
+        return None
+
+    if name == "deathCross":
+        # SMA 50 crosses below SMA 200
+        sma50 = indicators.get("sma_50")
+        sma200 = indicators.get("sma_200")
+        if sma50 is not None and sma200 is not None:
+            return 1 if sma50 < sma200 else 0
+        return None
+
+    # ==========================================================================
+    # MACD Cross indicators
+    # ==========================================================================
+    if name in ("macdBullishCross", "macdCross"):
+        macd = indicators.get("macd_line") or indicators.get("MACD_12_26_9")
+        signal = indicators.get("macd_signal") or indicators.get("MACDs_12_26_9")
+        if macd is not None and signal is not None:
+            return 1 if macd > signal else 0
+        return None
+
+    if name == "macdBearishCross":
+        macd = indicators.get("macd_line") or indicators.get("MACD_12_26_9")
+        signal = indicators.get("macd_signal") or indicators.get("MACDs_12_26_9")
+        if macd is not None and signal is not None:
+            return 1 if macd < signal else 0
+        return None
+
+    if name == "macdPositive":
+        macd = indicators.get("macd_line") or indicators.get("MACD_12_26_9")
+        if macd is not None:
+            return 1 if macd > 0 else 0
+        return None
+
+    # ==========================================================================
+    # Price vs MA indicators
+    # ==========================================================================
+    if name == "priceAboveEma" or name.startswith("aboveEma"):
+        period = params.get("period", 21)
+        ema = indicators.get(f"ema_{period}") or indicators.get(f"EMA_{period}")
+        if ema is not None and close > 0:
+            return 1 if close > ema else 0
+        return None
+
+    if name == "priceAboveSma" or name.startswith("aboveSma"):
+        period = params.get("period", 50)
+        sma = indicators.get(f"sma_{period}") or indicators.get(f"SMA_{period}")
+        if sma is not None and close > 0:
+            return 1 if close > sma else 0
+        return None
+
+    if name == "priceBelowEma":
+        period = params.get("period", 21)
+        ema = indicators.get(f"ema_{period}") or indicators.get(f"EMA_{period}")
+        if ema is not None and close > 0:
+            return 1 if close < ema else 0
+        return None
+
+    if name == "priceBelowSma":
+        period = params.get("period", 50)
+        sma = indicators.get(f"sma_{period}") or indicators.get(f"SMA_{period}")
+        if sma is not None and close > 0:
+            return 1 if close < sma else 0
+        return None
+
+    if name == "priceVsEma":
+        # Returns percentage difference from EMA
+        period = params.get("period", 21)
+        ema = indicators.get(f"ema_{period}") or indicators.get("ema_21")
+        if ema is not None and ema > 0:
+            return ((close - ema) / ema) * 100
+        return None
+
+    if name == "priceVsSma":
+        # Returns percentage difference from SMA
+        period = params.get("period", 20)
+        sma = indicators.get(f"sma_{period}") or indicators.get("sma_20")
+        if sma is not None and sma > 0:
+            return ((close - sma) / sma) * 100
+        return None
+
+    # ==========================================================================
+    # RSI conditions
+    # ==========================================================================
+    if name == "rsiOversold":
+        rsi = indicators.get("rsi_14") or indicators.get("RSI_14")
+        if rsi is not None:
+            return 1 if rsi < 30 else 0
+        return None
+
+    if name == "rsiOverbought":
+        rsi = indicators.get("rsi_14") or indicators.get("RSI_14")
+        if rsi is not None:
+            return 1 if rsi > 70 else 0
+        return None
+
+    # ==========================================================================
+    # Stochastic conditions
+    # ==========================================================================
+    if name == "stochOversold":
+        stoch_k = indicators.get("stoch_k") or indicators.get("STOCH_K")
+        if stoch_k is not None:
+            return 1 if stoch_k < 20 else 0
+        return None
+
+    if name == "stochOverbought":
+        stoch_k = indicators.get("stoch_k") or indicators.get("STOCH_K")
+        if stoch_k is not None:
+            return 1 if stoch_k > 80 else 0
+        return None
+
+    if name == "stochBullishCross":
+        stoch_k = indicators.get("stoch_k") or indicators.get("STOCH_K")
+        stoch_d = indicators.get("stoch_d") or indicators.get("STOCH_D")
+        if stoch_k is not None and stoch_d is not None:
+            return 1 if stoch_k > stoch_d else 0
+        return None
+
+    if name == "stochBearishCross":
+        stoch_k = indicators.get("stoch_k") or indicators.get("STOCH_K")
+        stoch_d = indicators.get("stoch_d") or indicators.get("STOCH_D")
+        if stoch_k is not None and stoch_d is not None:
+            return 1 if stoch_k < stoch_d else 0
+        return None
+
+    # ==========================================================================
+    # Williams %R conditions
+    # ==========================================================================
+    if name == "williamsOversold":
+        willr = indicators.get("willr_14") or indicators.get("WILLR_14")
+        if willr is not None:
+            return 1 if willr < -80 else 0
+        return None
+
+    if name == "williamsOverbought":
+        willr = indicators.get("willr_14") or indicators.get("WILLR_14")
+        if willr is not None:
+            return 1 if willr > -20 else 0
+        return None
+
+    # ==========================================================================
+    # Trend indicators
+    # ==========================================================================
+    if name == "strongTrend":
+        adx = indicators.get("adx_14") or indicators.get("ADX_14")
+        if adx is not None:
+            return 1 if adx > 25 else 0
+        return None
+
+    if name == "weakTrend":
+        adx = indicators.get("adx_14") or indicators.get("ADX_14")
+        if adx is not None:
+            return 1 if adx < 20 else 0
+        return None
+
+    if name == "trendingUp":
+        adx = indicators.get("adx_14") or indicators.get("ADX_14")
+        plus_di = indicators.get("plus_di") or indicators.get("DMP_14")
+        minus_di = indicators.get("minus_di") or indicators.get("DMN_14")
+        if adx is not None and plus_di is not None and minus_di is not None:
+            return 1 if adx > 20 and plus_di > minus_di else 0
+        return None
+
+    if name == "trendingDown":
+        adx = indicators.get("adx_14") or indicators.get("ADX_14")
+        plus_di = indicators.get("plus_di") or indicators.get("DMP_14")
+        minus_di = indicators.get("minus_di") or indicators.get("DMN_14")
+        if adx is not None and plus_di is not None and minus_di is not None:
+            return 1 if adx > 20 and minus_di > plus_di else 0
+        return None
+
+    # ==========================================================================
+    # Bollinger conditions
+    # ==========================================================================
+    if name == "bbAtUpper":
+        bb_percent = indicators.get("bb_percent") or indicators.get("PERCENT_B")
+        if bb_percent is not None:
+            return 1 if bb_percent > 0.95 else 0
+        return None
+
+    if name == "bbAtLower":
+        bb_percent = indicators.get("bb_percent") or indicators.get("PERCENT_B")
+        if bb_percent is not None:
+            return 1 if bb_percent < 0.05 else 0
+        return None
+
+    if name == "bbSqueeze":
+        bb_width = indicators.get("bb_width") or indicators.get("BBW_20")
+        if bb_width is not None:
+            return 1 if bb_width < 0.05 else 0
+        return None
+
+    # ==========================================================================
+    # Volume conditions
+    # ==========================================================================
+    if name == "volumeSpike":
+        volume = indicators.get("volume")
+        volume_sma = indicators.get("volume_sma_20")
+        if volume is not None and volume_sma is not None and volume_sma > 0:
+            return 1 if volume > volume_sma * 2 else 0
+        return None
+
+    if name == "volumeDry":
+        volume = indicators.get("volume")
+        volume_sma = indicators.get("volume_sma_20")
+        if volume is not None and volume_sma is not None and volume_sma > 0:
+            return 1 if volume < volume_sma * 0.5 else 0
+        return None
+
+    # ==========================================================================
+    # Aroon conditions
+    # ==========================================================================
+    if name == "aroonTrendUp":
+        aroon_up = indicators.get("aroon_up") or indicators.get("AROONU_14")
+        aroon_down = indicators.get("aroon_down") or indicators.get("AROOND_14")
+        if aroon_up is not None and aroon_down is not None:
+            return 1 if aroon_up > aroon_down and aroon_up > 70 else 0
+        return None
+
+    if name == "aroonTrendDown":
+        aroon_up = indicators.get("aroon_up") or indicators.get("AROONU_14")
+        aroon_down = indicators.get("aroon_down") or indicators.get("AROOND_14")
+        if aroon_up is not None and aroon_down is not None:
+            return 1 if aroon_down > aroon_up and aroon_down > 70 else 0
+        return None
+
+    # ==========================================================================
+    # Fisher Transform conditions
+    # ==========================================================================
+    if name == "fisherBullish":
+        fisher = indicators.get("fisher") or indicators.get("FISHERT_9")
+        fisher_signal = indicators.get("fisher_signal") or indicators.get("FISHERTs_9")
+        if fisher is not None and fisher_signal is not None:
+            return 1 if fisher > fisher_signal else 0
+        return None
+
+    if name == "fisherBearish":
+        fisher = indicators.get("fisher") or indicators.get("FISHERT_9")
+        fisher_signal = indicators.get("fisher_signal") or indicators.get("FISHERTs_9")
+        if fisher is not None and fisher_signal is not None:
+            return 1 if fisher < fisher_signal else 0
+        return None
+
+    # ==========================================================================
+    # Time/Session indicators (require timestamp)
+    # ==========================================================================
+    timestamp = indicators.get("timestamp")
+    if timestamp is not None:
+        from datetime import datetime, timezone
+
+        try:
+            # Convert timestamp (ms) to datetime
+            dt = datetime.fromtimestamp(timestamp / 1000, tz=timezone.utc)
+            hour = dt.hour
+            weekday = dt.weekday()  # 0=Monday, 6=Sunday
+
+            if name == "isAsianSession":
+                # Asian session: 00:00-09:00 UTC (Tokyo/HK/Singapore)
+                return 1 if 0 <= hour < 9 else 0
+
+            if name == "isEuropeanSession":
+                # European session: 07:00-16:00 UTC (London)
+                return 1 if 7 <= hour < 16 else 0
+
+            if name == "isUSMarketHours":
+                # US market: 13:30-20:00 UTC (NYSE open)
+                return 1 if 13 <= hour < 20 else 0
+
+            if name == "isWeekend":
+                return 1 if weekday >= 5 else 0
+
+            if name == "isMonday":
+                return 1 if weekday == 0 else 0
+
+            if name == "isTuesday":
+                return 1 if weekday == 1 else 0
+
+            if name == "isWednesday":
+                return 1 if weekday == 2 else 0
+
+            if name == "isThursday":
+                return 1 if weekday == 3 else 0
+
+            if name == "isFriday":
+                return 1 if weekday == 4 else 0
+
+        except (ValueError, OSError):
+            return None
+
+    # ==========================================================================
+    # Regime indicators (simplified heuristic)
+    # ==========================================================================
+    if name == "volatilityRegime":
+        # Return string: "low", "medium", "high"
+        natr = indicators.get("natr_14") or indicators.get("NATR_14")
+        if natr is not None:
+            if natr < 2:
+                return "low"
+            elif natr < 5:
+                return "medium"
+            else:
+                return "high"
+        return None
+
+    if name == "trendRegime":
+        # Return string: "uptrend", "downtrend", "sideways"
+        adx = indicators.get("adx_14") or indicators.get("ADX_14")
+        plus_di = indicators.get("plus_di") or indicators.get("DMP_14")
+        minus_di = indicators.get("minus_di") or indicators.get("DMN_14")
+        if adx is not None:
+            if adx < 20:
+                return "sideways"
+            elif plus_di is not None and minus_di is not None:
+                if plus_di > minus_di:
+                    return "uptrend"
+                else:
+                    return "downtrend"
+        return None
+
+    # Not a computed indicator we handle
+    return None
 
 
 # Indicator bounds for confidence calculation
@@ -598,7 +1033,8 @@ def evaluate_conditions(
             condition_details=[],
         )
 
-    # Convert list format to dict format if needed
+    # Convert list format to dict format if needed, but keep original conditions for params
+    original_conditions_list = conditions if isinstance(conditions, list) else None
     if isinstance(conditions, list):
         conditions_dict = {}
         for cond in conditions:
@@ -607,6 +1043,7 @@ def evaluate_conditions(
                 conditions_dict[indicator_name] = {
                     "operator": cond.get("operator", ">"),
                     "value": cond.get("value", cond.get("threshold", 0)),
+                    "params": cond.get("params", {}),  # Preserve params for computed indicators
                 }
         conditions = conditions_dict
 
@@ -621,6 +1058,14 @@ def evaluate_conditions(
 
         # Resolve indicator name
         resolved = resolve_indicator(indicator_name, available)
+
+        # If not found, try computing it (for derived/computed indicators)
+        if resolved is None and indicator_name in COMPUTED_INDICATORS:
+            computed_value = compute_derived_indicator(indicator_name, indicators, condition)
+            if computed_value is not None:
+                # Use computed value directly
+                resolved = indicator_name  # Use original name for reporting
+                indicators[indicator_name] = computed_value  # Add to indicators dict
 
         if resolved is None:
             details.append(
@@ -649,17 +1094,59 @@ def evaluate_conditions(
         min_val, max_val = get_indicator_bounds(resolved)
 
         # Handle string/categorical thresholds (e.g., 'high', 'uptrend')
-        # These can't be numerically compared - skip them
+        # These need string equality comparison
         if isinstance(threshold, str):
+            # Check if current value is also a string (regime indicators)
+            if isinstance(current_value, str):
+                is_met = current_value == threshold
+                details.append(
+                    {
+                        "indicator": indicator_name,
+                        "resolved": resolved,
+                        "operator": operator,
+                        "threshold": threshold,
+                        "value": current_value,
+                        "confidence": 1.0 if is_met else 0.0,
+                        "met": is_met,
+                    }
+                )
+                if is_met:
+                    met_count += 1
+                    confidences.append(1.0)
+            else:
+                # Threshold is string but value is numeric - can't compare
+                details.append(
+                    {
+                        "indicator": indicator_name,
+                        "resolved": resolved,
+                        "status": "type_mismatch",
+                        "threshold": threshold,
+                        "value": current_value,
+                        "confidence": None,
+                    }
+                )
+            continue
+
+        # Handle list thresholds (e.g., ["sideways", "uptrend"]) for 'in' operator
+        if isinstance(threshold, list) and operator == "in":
+            if isinstance(current_value, str):
+                is_met = current_value in threshold
+            else:
+                is_met = current_value in threshold
             details.append(
                 {
                     "indicator": indicator_name,
                     "resolved": resolved,
-                    "status": "categorical",
+                    "operator": operator,
                     "threshold": threshold,
-                    "confidence": None,
+                    "value": current_value,
+                    "confidence": 1.0 if is_met else 0.0,
+                    "met": is_met,
                 }
             )
+            if is_met:
+                met_count += 1
+                confidences.append(1.0)
             continue
 
         # Handle 'between' operator
