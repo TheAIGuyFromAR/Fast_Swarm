@@ -224,6 +224,8 @@ async def run_enrichment(
         Dict of symbol_timeframe -> rows updated
     """
     results = {}
+    import time
+    global_start = time.time()
 
     async with async_session_maker() as session:
         # Get distinct symbol/timeframe combinations if not specified
@@ -232,7 +234,7 @@ async def run_enrichment(
                 SELECT DISTINCT symbol, timeframe
                 FROM enhanced_candles
                 WHERE derived_computed_at IS NULL
-                LIMIT 100
+                LIMIT 500
             """)
             result = await session.execute(query)
             pairs = result.fetchall()
@@ -240,12 +242,17 @@ async def run_enrichment(
             pairs = [(s, t) for s in symbols for t in timeframes]
 
         total_updated = 0
+        total_pairs = len(pairs)
+        print(f"[Enrichment] Found {total_pairs} symbol/timeframe pairs to process", flush=True)
 
-        for symbol, timeframe in pairs:
-            logger.info(f"[Enrichment] Processing {symbol}/{timeframe}...")
+        for idx, (symbol, timeframe) in enumerate(pairs):
+            pair_start = time.time()
+            print(f"[Enrichment] [{idx+1}/{total_pairs}] Processing {symbol}/{timeframe}...", flush=True)
 
             updated = 0
+            batch_num = 0
             while True:
+                batch_num += 1
                 batch_updated = await compute_derived_indicators_batch(
                     session,
                     symbol=symbol,
@@ -257,13 +264,18 @@ async def run_enrichment(
                     break
 
                 updated += batch_updated
-                logger.info(f"[Enrichment] {symbol}/{timeframe}: +{batch_updated} ({updated} total)")
+                total_updated += batch_updated
+                elapsed = time.time() - global_start
+                rate = total_updated / elapsed if elapsed > 0 else 0
+                print(f"  [Batch {batch_num}] +{batch_updated:,} rows | {symbol}/{timeframe}: {updated:,} | Total: {total_updated:,} | Rate: {rate:,.0f}/sec", flush=True)
 
+            pair_elapsed = time.time() - pair_start
             if updated > 0:
                 results[f"{symbol}_{timeframe}"] = updated
-                total_updated += updated
+                print(f"[Enrichment] ✓ {symbol}/{timeframe}: {updated:,} rows in {pair_elapsed:.1f}s", flush=True)
 
-        logger.info(f"[Enrichment] COMPLETE: {total_updated} total rows enriched")
+        total_elapsed = time.time() - global_start
+        print(f"[Enrichment] COMPLETE: {total_updated:,} total rows enriched in {total_elapsed:.1f}s", flush=True)
 
     return results
 
