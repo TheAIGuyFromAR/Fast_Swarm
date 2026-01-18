@@ -61,6 +61,14 @@ class PipelineState:
     last_error: str | None = None
     consecutive_errors: int = 0
 
+    # Timeout tracking
+    patterns_skipped_timeout: int = 0  # Patterns skipped due to timeout
+    agents_skipped_timeout: int = 0  # Agents skipped due to timeout
+
+    # Watchdog tracking
+    last_progress_at: datetime | None = None  # Last time any progress was made
+    watchdog_killed_phase: bool = False  # Set true if watchdog had to kill a phase
+
 
 class BacktestOrchestrator:
     """
@@ -81,6 +89,11 @@ class BacktestOrchestrator:
     PARALLEL_TESTS = 8  # Tuned for 128GB system with PostgreSQL memory fix
     COOLDOWN_SECONDS = 60  # Pause between cycles
     MAX_CONSECUTIVE_ERRORS = 3  # Stop after this many errors
+
+    # Timeout settings (prevent freezing)
+    PATTERN_TIMEOUT_SECONDS = 30  # Max time per pattern test before skip
+    AGENT_TIMEOUT_SECONDS = 60  # Max time per agent test before skip
+    PHASE_WATCHDOG_SECONDS = 600  # 10 minutes - kill phase if no progress
 
     def __init__(self):
         self.state = PipelineState()
@@ -243,8 +256,9 @@ class BacktestOrchestrator:
         print(f"[Orchestrator] Loaded {len(self._current_windows)} windows (candles load per-window on demand)")
 
     async def _phase_test_patterns(self, session: AsyncSession):
-        """Phase 2: Test patterns on current windows."""
+        """Phase 2: Test patterns on current windows with watchdog protection."""
         self.state.phase = PipelinePhase.TESTING_PATTERNS
+        self.state.watchdog_killed_phase = False
         print("[Orchestrator] Phase 2: Testing patterns...")
 
         from sqlmodel import select
@@ -263,37 +277,112 @@ class BacktestOrchestrator:
 
         self.state.patterns_total = len(patterns)
         self.state.patterns_tested = 0
+        self.state.patterns_skipped_timeout = 0
+        self.state.last_progress_at = datetime.utcnow()
 
         if not patterns:
             print("[Orchestrator] No patterns to test")
             return
 
-        # Test patterns in parallel batches
+        # Test patterns in parallel batches WITH WATCHDOG
         from Fast_Swarm.Patterns.Services.discovery_service import PatternDiscoveryService
 
         service = PatternDiscoveryService()
         semaphore = asyncio.Semaphore(self.PARALLEL_TESTS)
 
-        async def test_one_pattern(pattern):
-            async with semaphore:
-                if not self._running:
-                    return
-                try:
-                    await service.test_pattern_on_windows(
-                        session,
-                        pattern,
-                        self._current_windows,
-                        preloaded_candles=self._preloaded_candles,
-                    )
-                    self.state.patterns_tested += 1
-                except Exception as e:
-                    print(f"[Orchestrator] Error testing pattern {pattern.pattern_id}: {e}")
+        # Track results for summary
+        zero_trade_count = 0
+        tested_count = 0
+        watchdog_triggered = False
 
-        # Run all pattern tests with concurrency limit
-        await asyncio.gather(*[test_one_pattern(p) for p in patterns])
+        async def test_one_pattern(pattern, idx: int):
+            """Test single pattern with timeout to prevent freezing."""
+            nonlocal zero_trade_count, tested_count, watchdog_triggered
+            async with semaphore:
+                if not self._running or watchdog_triggered:
+                    return {"status": "stopped"}
+
+                try:
+                    # Apply timeout to prevent hanging on any single pattern
+                    result = await asyncio.wait_for(
+                        service.test_pattern_on_windows(
+                            session,
+                            pattern,
+                            self._current_windows,
+                            preloaded_candles=self._preloaded_candles,
+                        ),
+                        timeout=self.PATTERN_TIMEOUT_SECONDS,
+                    )
+
+                    tested_count += 1
+                    self.state.patterns_tested = tested_count
+                    self.state.last_progress_at = datetime.utcnow()  # Update watchdog
+
+                    # Track zero-trade patterns for diagnostics
+                    trades = result.get("total_trades", 0) if result else 0
+                    if trades == 0:
+                        zero_trade_count += 1
+
+                    return {"status": "ok", "trades": trades}
+
+                except asyncio.TimeoutError:
+                    self.state.patterns_skipped_timeout += 1
+                    self.state.last_progress_at = datetime.utcnow()  # Timeout is still progress
+                    print(f"[Orchestrator] TIMEOUT: Pattern {pattern.pattern_id[:8]} exceeded {self.PATTERN_TIMEOUT_SECONDS}s")
+                    return {"status": "timeout"}
+                except Exception as e:
+                    self.state.last_progress_at = datetime.utcnow()  # Error is still progress
+                    print(f"[Orchestrator] Error testing pattern {pattern.pattern_id[:8]}: {e}")
+                    return {"status": "error", "error": str(e)}
+
+        async def watchdog():
+            """Kill the phase if no progress for PHASE_WATCHDOG_SECONDS."""
+            nonlocal watchdog_triggered
+            while not watchdog_triggered and self._running:
+                await asyncio.sleep(30)  # Check every 30 seconds
+
+                if self.state.last_progress_at:
+                    elapsed = (datetime.utcnow() - self.state.last_progress_at).total_seconds()
+                    if elapsed > self.PHASE_WATCHDOG_SECONDS:
+                        watchdog_triggered = True
+                        self.state.watchdog_killed_phase = True
+                        print("")
+                        print("=" * 70)
+                        print("🚨 CRITICAL: WATCHDOG TRIGGERED - PHASE KILLED 🚨")
+                        print(f"   No progress for {elapsed:.0f}s (limit: {self.PHASE_WATCHDOG_SECONDS}s)")
+                        print(f"   Tested {tested_count}/{self.state.patterns_total} patterns before freeze")
+                        print(f"   Phase: {self.state.phase.value}")
+                        print("   Moving to next phase...")
+                        print("=" * 70)
+                        print("")
+                        return
+
+        # Start watchdog and pattern tests concurrently
+        watchdog_task = asyncio.create_task(watchdog())
+
+        try:
+            results = await asyncio.gather(*[test_one_pattern(p, i) for i, p in enumerate(patterns)])
+        finally:
+            watchdog_task.cancel()
+            try:
+                await watchdog_task
+            except asyncio.CancelledError:
+                pass
 
         await session.commit()
-        print(f"[Orchestrator] Tested {self.state.patterns_tested}/{self.state.patterns_total} patterns")
+
+        # Summary with diagnostic warning if many patterns produced 0 trades
+        timeouts = sum(1 for r in results if r.get("status") == "timeout")
+        zero_pct = (zero_trade_count / len(patterns) * 100) if patterns else 0
+
+        summary = f"[Orchestrator] Tested {tested_count}/{self.state.patterns_total} patterns"
+        if timeouts > 0:
+            summary += f" (timeouts={timeouts})"
+        if watchdog_triggered:
+            summary += " ⚠️ WATCHDOG KILLED"
+        if zero_pct > 50:
+            summary += f" ⚠️ {zero_pct:.0f}% had 0 trades - check indicator enrichment!"
+        print(summary)
 
     async def _phase_test_agents(self, session: AsyncSession):
         """Phase 3: Test agents on current windows (same windows as patterns!)."""

@@ -88,7 +88,11 @@ class LazyCandleCache:
         return False
 
     def __getitem__(self, cache_key: str) -> "pd.DataFrame":
-        """Load candles on first access, return cached data on subsequent access."""
+        """Load candles on first access, return cached data on subsequent access.
+
+        WARNING: This is SYNC and will block the event loop.
+        Use get_async() in async contexts for non-blocking loads.
+        """
         if cache_key in self._cache:
             return self._cache[cache_key]
 
@@ -116,8 +120,49 @@ class LazyCandleCache:
         print(f"  [Lazy] Loaded {cache_key}: {len(df)} candles")
         return df
 
+    async def get_async(self, cache_key: str, default=None) -> "pd.DataFrame":
+        """
+        Async version of get() - runs sync DB load in thread pool.
+
+        This allows asyncio.wait_for() timeouts to actually work because
+        the blocking DB call runs in a separate thread, not blocking the event loop.
+        """
+        import asyncio
+
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+
+        # Parse key
+        parts = cache_key.rsplit("_", 1)
+        if len(parts) != 2:
+            return default
+
+        symbol, timeframe = parts
+        key = (symbol, timeframe)
+
+        if key not in self._ranges:
+            return default
+
+        ts_range = self._ranges[key]
+        print(f"  [Lazy] Loading {cache_key} (async)...")
+
+        # Run sync loader in thread pool - this is the key fix!
+        # Now asyncio.wait_for() can actually cancel this if it times out
+        df = await asyncio.to_thread(
+            self._loader.load_candles,
+            asset=symbol,
+            timeframe=timeframe,
+            start_ts=ts_range["min_ts"],
+            end_ts=ts_range["max_ts"],
+            with_indicators=True,
+        )
+
+        self._cache[cache_key] = df
+        print(f"  [Lazy] Loaded {cache_key}: {len(df)} candles")
+        return df
+
     def get(self, cache_key: str, default=None):
-        """Dict-compatible get method."""
+        """Dict-compatible get method (SYNC - blocks event loop)."""
         try:
             return self[cache_key]
         except KeyError:
