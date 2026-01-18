@@ -20,8 +20,10 @@ from Fast_Swarm.Database import async_session_maker
 logger = logging.getLogger("indicator_enrichment")
 
 
-# Batch size for updates (avoid memory issues on 5M+ rows)
-BATCH_SIZE = 10000
+# Batch size for updates
+# TimescaleDB has a decompression limit (default 100k tuples per DML)
+# We use smaller batches to stay well under this limit
+BATCH_SIZE = 5000
 
 
 async def compute_derived_indicators_batch(
@@ -228,6 +230,13 @@ async def run_enrichment(
     global_start = time.time()
 
     async with async_session_maker() as session:
+        # Increase TimescaleDB decompression limit for this session
+        # Default is 100k which is too low for batch updates on compressed hypertables
+        try:
+            await session.execute(text("SET timescaledb.max_tuples_decompressed_per_dml_transaction = 0"))
+            print("[Enrichment] TimescaleDB decompression limit disabled for this session", flush=True)
+        except Exception as e:
+            print(f"[Enrichment] Warning: Could not set TimescaleDB limit: {e}", flush=True)
         # Get distinct symbol/timeframe combinations if not specified
         if not symbols or not timeframes:
             query = text("""
