@@ -272,7 +272,7 @@ async def run_enrichment(
             pair_elapsed = time.time() - pair_start
             if updated > 0:
                 results[f"{symbol}_{timeframe}"] = updated
-                print(f"[Enrichment] ✓ {symbol}/{timeframe}: {updated:,} rows in {pair_elapsed:.1f}s", flush=True)
+                print(f"[Enrichment] DONE {symbol}/{timeframe}: {updated:,} rows in {pair_elapsed:.1f}s", flush=True)
 
         total_elapsed = time.time() - global_start
         print(f"[Enrichment] COMPLETE: {total_updated:,} total rows enriched in {total_elapsed:.1f}s", flush=True)
