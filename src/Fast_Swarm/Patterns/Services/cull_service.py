@@ -32,7 +32,7 @@ class PatternCullService:
         """
         # Get all active patterns sorted by fitness
         result = await session.exec(
-            select(Pattern).where(Pattern.is_active == True).order_by(desc(Pattern.fitness_score))
+            select(Pattern).where(Pattern.is_active.is_(True)).order_by(desc(Pattern.fitness_score))
         )
         patterns = result.all()
 

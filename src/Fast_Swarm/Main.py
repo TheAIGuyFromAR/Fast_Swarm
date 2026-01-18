@@ -7,6 +7,7 @@ if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 import asyncio
+import os
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
@@ -16,14 +17,57 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+# =============================================================================
+# OpenTelemetry Tracing Setup
+# =============================================================================
+# Set OTEL_ENABLED=1 to enable tracing, OTEL_EXPORTER=jaeger for Jaeger export
+OTEL_ENABLED = os.getenv("OTEL_ENABLED", "0") == "1"
+
+if OTEL_ENABLED:
+    try:
+        from opentelemetry import trace
+        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+        from opentelemetry.sdk.resources import Resource
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
+
+        # Create tracer provider with service name
+        resource = Resource.create({"service.name": "fast-swarm"})
+        provider = TracerProvider(resource=resource)
+
+        # Choose exporter based on env var
+        if os.getenv("OTEL_EXPORTER") == "jaeger":
+            try:
+                from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+                exporter = OTLPSpanExporter(endpoint=os.getenv("OTEL_ENDPOINT", "localhost:4317"))
+                print("[OTel] Using OTLP/Jaeger exporter")
+            except ImportError:
+                exporter = ConsoleSpanExporter()
+                print("[OTel] Jaeger exporter not installed, falling back to console")
+        else:
+            exporter = ConsoleSpanExporter()
+            print("[OTel] Using console exporter (set OTEL_EXPORTER=jaeger for Jaeger)")
+
+        provider.add_span_processor(BatchSpanProcessor(exporter))
+        trace.set_tracer_provider(provider)
+
+        OTEL_TRACER = trace.get_tracer("fast-swarm")
+        print("[OTel] Tracing enabled")
+    except ImportError as e:
+        print(f"[OTel] OpenTelemetry not installed: {e}")
+        print("[OTel] Install with: pip install opentelemetry-api opentelemetry-sdk opentelemetry-instrumentation-fastapi")
+        OTEL_ENABLED = False
+        OTEL_TRACER = None
+else:
+    OTEL_TRACER = None
+
 from Fast_Swarm.Agents.Hivemind.Routers import governance_router
-from Fast_Swarm.Agents.Models.agent_models import EvolutionRunRequest
 from Fast_Swarm.Agents.Routers import actions_router, evolution_router
 
 # Import Domain Routers
 from Fast_Swarm.Agents.Routers import agent_router as agents_router
-from Fast_Swarm.Agents.Services.evolution_service import get_evolution_status, trigger_evolution
-from Fast_Swarm.Database import async_session_maker, init_db
+from Fast_Swarm.Agents.Services.evolution_service import reset_evolution_flag
+from Fast_Swarm.Database import init_db
 from Fast_Swarm.Dependencies import data_collector, robustness_service, stream_manager
 from Fast_Swarm.Docker import ensure_database
 from Fast_Swarm.Evolution.Routers import evolution_router as evolution_monitor_router
@@ -35,145 +79,25 @@ from Fast_Swarm.Infrastructure.Services.backfill_service import startup_backfill
 from Fast_Swarm.local_agents.backtest.windows import initialize as init_window_pool
 from Fast_Swarm.local_agents.backtest.windows import refresh_and_extend as refresh_window_pool
 from Fast_Swarm.Patterns.Routers import pattern_router as patterns_router
-from Fast_Swarm.Patterns.Services.discovery_service import PatternDiscoveryService
 from Fast_Swarm.System.Routers import system_router
+from Fast_Swarm.System.Services.orchestrator import get_orchestrator
 from Fast_Swarm.Tests.Router import router as test_runner_router
 from Fast_Swarm.Trades.Routers import trade_router as trades_router
 
-
-async def evolution_loop():
-    """
-    Background evolution loop - runs continuously after startup.
-
-    - Waits 60 seconds for data backfill to progress
-    - Runs evolution with 5 generations per cycle
-    - Waits 5 minutes between cycles
-    """
-
-    # Wait for initial backfill to progress
-    print("[Evolution Loop] Waiting 60 seconds for data backfill...")
-    await asyncio.sleep(60)
-
-    while True:
-        try:
-            status = get_evolution_status()
-            if status["is_running"]:
-                print("[Evolution Loop] Evolution already running, waiting...")
-                await asyncio.sleep(60)
-                continue
-
-            print("[Evolution Loop] Starting evolution cycle (5 generations)...")
-
-            # Create a mock BackgroundTasks (we're already in background)
-            class MockBackgroundTasks:
-                def add_task(self, func, **kwargs):
-                    asyncio.create_task(func(**kwargs))
-
-            request = EvolutionRunRequest(
-                generations=5,
-                population_size=500,
-                elite_percent=0.20,
-                survival_percent=0.60,
-                mutation_rate=0.15,
-                assets=["BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "AVAX", "DOGE"],
-                timeframe="1h",  # Primary timeframe for evolution cycle
-            )
-
-            result = await trigger_evolution(MockBackgroundTasks(), request)
-            print(f"[Evolution Loop] {result.get('message', 'Started')}")
-
-            # Wait for evolution to complete + 2 minute cooldown
-            while get_evolution_status()["is_running"]:
-                await asyncio.sleep(30)
-
-            print("[Evolution Loop] Cycle complete. Waiting 2 minutes before next cycle...")
-            await asyncio.sleep(120)  # 2 minutes between cycles
-
-        except Exception as e:
-            print(f"[Evolution Loop] Error: {e}")
-            await asyncio.sleep(60)
-
-
-async def pattern_discovery_loop():
-    """
-    Background pattern discovery loop - creates new patterns periodically.
-
-    - Waits 5 minutes for initial data to be available
-    - Runs discovery cycle every 6 hours
-    - Creates new patterns using ML feature extraction + LLM generation
-    """
-    print("[Pattern Discovery] Waiting 5 minutes for initial data...")
-    await asyncio.sleep(300)  # 5 minutes
-
-    discovery_service = PatternDiscoveryService()
-
-    while True:
-        try:
-            print("[Pattern Discovery] Starting discovery cycle...")
-            async with async_session_maker() as session:
-                result = await discovery_service.run_discovery_cycle(session)
-                print(f"[Pattern Discovery] Created {result.get('patterns_created', 0)} new patterns")
-
-            # Run every 6 hours
-            print("[Pattern Discovery] Sleeping 6 hours until next cycle...")
-            await asyncio.sleep(6 * 60 * 60)
-
-        except Exception as e:
-            print(f"[Pattern Discovery] Error: {e}")
-            await asyncio.sleep(300)  # Retry in 5 minutes
-
-
-async def pattern_backtest_loop():
-    """
-    Background pattern backtesting loop - tests patterns continuously.
-
-    Every 3rd cycle also runs regime backtest (canonical crash/bull/bear periods).
-    """
-    print("[Pattern Backtest] Waiting 2 minutes for data backfill...")
-    await asyncio.sleep(120)
-
-    discovery_service = PatternDiscoveryService()
-    from sqlmodel import select
-
-    from Fast_Swarm.Patterns.Models.pattern_models import Pattern
-    from Fast_Swarm.Patterns.Services.backtest_service import PatternBacktestService
-
-    regime_backtest_service = PatternBacktestService()
-    cycle_count = 0
-
-    while True:
-        try:
-            cycle_count += 1
-            print("[Pattern Backtest] Running batch backtest...")
-            async with async_session_maker() as session:
-                result = await discovery_service.run_batch_backtest(session, batch_size=50)
-                tested = result.get("patterns_tested", 0)
-                promotions = result.get("tier_promotions", {})
-                print(
-                    f"[Pattern Backtest] Tested {tested} patterns, "
-                    f"promotions: T1={promotions.get('to_tier_1', 0)}, T2={promotions.get('to_tier_2', 0)}"
-                )
-
-            if cycle_count % 3 == 0:
-                print("[Pattern Backtest] Running regime backtest...")
-                async with async_session_maker() as session:
-                    result = await session.exec(
-                        select(Pattern)
-                        .where(Pattern.is_active == True)
-                        .where(Pattern.fitness_by_regime == {})
-                        .limit(20)
-                    )
-                    patterns = result.all()
-                    if patterns:
-                        ids = [p.pattern_id for p in patterns]
-                        await regime_backtest_service.backtest_patterns_by_regime(session, ids)
-                        print(f"[Pattern Backtest] Regime tested {len(ids)} patterns")
-
-            await asyncio.sleep(600)
-
-        except Exception as e:
-            print(f"[Pattern Backtest] Error: {e}")
-            await asyncio.sleep(120)
+# =============================================================================
+# REMOVED: Separate concurrent loops (evolution_loop, pattern_discovery_loop,
+# pattern_backtest_loop) - these caused resource contention.
+#
+# REPLACED WITH: BacktestOrchestrator - runs phases sequentially:
+# 1. Load windows ONCE from pool
+# 2. Test batch of patterns on those windows
+# 3. Test batch of agents on those SAME windows (reusing preloaded data)
+# 4. Run evolution cycle
+# 5. Run pattern discovery
+# 6. Cooldown, then repeat
+#
+# P0 (Data Collection) runs independently - never blocked by P2 operations.
+# =============================================================================
 
 
 async def window_pool_refresh_loop():
@@ -226,8 +150,6 @@ async def lifespan(app: FastAPI):
     await init_db()
 
     # 1.1. Reset evolution global flag (prevents stuck flag after crash)
-    from Fast_Swarm.Agents.Services.evolution_service import reset_evolution_flag
-
     reset_evolution_flag()
     print("[Startup] Evolution flag reset (prevents stuck flag after crash)")
 
@@ -257,24 +179,24 @@ async def lifespan(app: FastAPI):
     # This fills gaps in BTC/ETH/SOL data for backtesting
     asyncio.create_task(startup_backfill())
 
-    # 4. Start Robustness Chaos Loop
-    robustness_service.register_test(data_collector._flush_batches)
-    robustness_service.register_test(robustness_service.validate_economic_assumptions)  # EDD Tests
-    asyncio.create_task(robustness_service.start_chaos_loop())
+    # 4. Robustness Chaos Loop (disabled - runs random EDD tests periodically)
+    # robustness_service.register_test(data_collector._flush_batches)
+    # robustness_service.register_test(robustness_service.validate_economic_assumptions)
+    # asyncio.create_task(robustness_service.start_chaos_loop())
 
-    # 5. Start Evolution Loop (continuous background evolution)
-    print("[Startup] Starting evolution loop...")
-    asyncio.create_task(evolution_loop())
+    # 5. Start Backtest Orchestrator (P2 - sequential pipeline)
+    # This replaces the old concurrent loops (evolution_loop, pattern_discovery_loop,
+    # pattern_backtest_loop) which caused resource contention.
+    #
+    # Priority System:
+    # - P0: Data collection (above) - runs independently, never blocked
+    # - P1: Live trades - not implemented yet
+    # - P2: Backtesting/Evolution - handled by orchestrator sequentially
+    print("[Startup] Starting backtest orchestrator (P2 sequential pipeline)...")
+    orchestrator = get_orchestrator()
+    await orchestrator.start()
 
-    # 6. Start Pattern Discovery Loop (creates new patterns every 6 hours)
-    print("[Startup] Starting pattern discovery loop...")
-    asyncio.create_task(pattern_discovery_loop())
-
-    # 7. Start Pattern Backtest Loop (tests patterns every 10 minutes)
-    print("[Startup] Starting pattern backtest loop...")
-    asyncio.create_task(pattern_backtest_loop())
-
-    # 8. Start Window Pool Refresh Loop (maintains coverage as data grows)
+    # 6. Start Window Pool Refresh Loop (daily at 3am, low impact)
     print("[Startup] Starting window pool refresh loop...")
     asyncio.create_task(window_pool_refresh_loop())
 
@@ -282,6 +204,10 @@ async def lifespan(app: FastAPI):
 
     # Shutdown logic
     print("Shutting down...")
+
+    # Stop orchestrator first (graceful shutdown of P2 operations)
+    await orchestrator.stop()
+
     await stream_manager.stop()
     await data_collector.flush_all()  # Flush all pending data
     await robustness_service.stop()
@@ -292,7 +218,16 @@ app = FastAPI(
     description="FastAPI wrapper for Coinswarm trading system",
     version="1.0.0",
     lifespan=lifespan,
+    redirect_slashes=False,  # Don't redirect /patterns to /patterns/ (breaks dashboard fetch)
 )
+
+# Instrument FastAPI with OpenTelemetry (must be after app creation)
+if OTEL_ENABLED:
+    try:
+        FastAPIInstrumentor.instrument_app(app)
+        print("[OTel] FastAPI instrumentation active")
+    except Exception as e:
+        print(f"[OTel] FastAPI instrumentation failed: {e}")
 
 # Add CORS middleware for dashboard access
 app.add_middleware(

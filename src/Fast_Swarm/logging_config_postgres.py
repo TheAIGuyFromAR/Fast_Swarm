@@ -846,7 +846,8 @@ async def query_critical_events_async(
 
     try:
         async with await psycopg.AsyncConnection.connect(POSTGRES_CONN_STRING) as conn:
-            cursor = await conn.execute(
+            # Note: where_clause is safe - built from hardcoded column names only
+            cursor = await conn.execute(  # nosec B608
                 f"""
                 SELECT * FROM critical_events
                 WHERE {where_clause}

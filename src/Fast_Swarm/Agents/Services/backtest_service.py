@@ -6,7 +6,6 @@ Updates agent stats (fitness, sharpe, etc.) in the database.
 All data comes from PostgreSQL enhanced_candles table (5.2M+ rows).
 """
 
-import random
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -20,7 +19,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "local_agent
 from Fast_Swarm.local_agents.backtest.data import OHLCVLoader, preload_candles_for_windows
 from Fast_Swarm.local_agents.backtest.engine import BacktestConfig, LocalBacktestEngine
 from Fast_Swarm.local_agents.core.canonical_periods import (
-    REGIMES,
     get_canonical_periods_for_backtesting,
 )
 from Fast_Swarm.local_agents.core.state import AgentRecord
@@ -35,8 +33,9 @@ from .fitness_service import TradeData, calculate_fitness
 class AgentBacktestService:
     """Service for backtesting agents using PostgreSQL data."""
 
-    # Random window generation settings - HUNDREDS of windows for robust testing
-    WINDOWS_PER_ASSET_PER_TF = 20  # Windows per asset per timeframe
+    # Window selection settings - use pre-generated pool
+    WINDOWS_PER_BACKTEST = 50  # Select ~50 windows from pool per backtest run
+    CANONICAL_WINDOWS_PER_REGIME = 4  # Max canonical windows per regime type
 
     # Regime importance weights for weighted fitness calculation
     # Higher weights = harder market conditions worth more in fitness
@@ -84,94 +83,82 @@ class AgentBacktestService:
         # OHLCVLoader now uses PostgreSQL - no file path needed
         self.loader = OHLCVLoader()
 
-    async def _generate_random_windows(
-        self, session: AsyncSession, assets: list[str], timeframes: list[str] = None
+    async def _get_windows_from_pool(
+        self,
+        session: AsyncSession,
+        agent_id: str = None,
+        count: int = None,
     ) -> list[dict]:
         """
-        Generate random backtest windows for each asset across multiple timeframes.
+        Get random windows from the pre-generated pool.
 
-        Returns list of windows with start_ts/end_ts/timeframe for diverse testing.
-        With 8 assets × 4 timeframes × 20 windows = 640 windows per backtest!
+        Uses the window pool (~15K windows) and selects a subset for this backtest.
+        If agent_id provided, skips windows the agent has already tested.
 
-        OPTIMIZED: Uses single batched query instead of 48 separate queries.
+        Args:
+            session: Database session
+            agent_id: Optional agent ID to check for already-tested windows
+            count: Number of windows to select (default: WINDOWS_PER_BACKTEST)
+
+        Returns:
+            List of window dicts with asset/timeframe/start_ts/end_ts/regime
         """
-        from sqlalchemy import text
+        from Fast_Swarm.local_agents.backtest.windows import get_pool_stats, get_windows, is_initialized
 
+        count = count or self.WINDOWS_PER_BACKTEST
+
+        # Ensure pool is initialized
+        if not is_initialized():
+            print("[Backtest] WARNING: Window pool not initialized, using fallback")
+            return []
+
+        # Get windows from pool
+        pool_windows = get_windows(count=count * 2)  # Get extra to filter tested ones
+
+        # If we have an agent, filter out already-tested windows
+        # Uses aggregation instead of LIMIT to get complete tested window set
+        tested_window_keys = set()
+        if agent_id:
+            try:
+                from sqlalchemy import text
+                result = await session.execute(
+                    text("""
+                        SELECT symbol || '_' || timeframe || '_' ||
+                               EXTRACT(EPOCH FROM entry_timestamp)::bigint as window_key
+                        FROM backtest_trades_unified
+                        WHERE agent_id = :agent_id
+                        GROUP BY symbol, timeframe, entry_timestamp
+                    """),
+                    {"agent_id": agent_id}
+                )
+                tested_window_keys = {row[0] for row in result.fetchall()}
+            except Exception as e:
+                print(f"[Backtest] Could not fetch tested windows: {e}")
+
+        # Convert pool windows to dict format, filtering already-tested
         windows = []
-        timeframes = timeframes or self.DEFAULT_TIMEFRAMES
+        for w in pool_windows:
+            # Create a key to check if this window was tested
+            window_key = f"{w.symbol}_{w.timeframe}_{w.start_ts // 1000}"
 
-        # Timeframe to milliseconds
-        tf_ms = {
-            "1m": 60_000,
-            "5m": 300_000,
-            "15m": 900_000,
-            "1h": 3_600_000,
-            "4h": 14_400_000,
-            "1d": 86_400_000,
-        }
-
-        # BATCHED QUERY: Get data ranges for ALL asset/timeframe combos in ONE query
-        try:
-            result = await session.execute(
-                text("""
-                    SELECT
-                        symbol,
-                        timeframe,
-                        EXTRACT(EPOCH FROM MIN(time)) * 1000 as min_ts,
-                        EXTRACT(EPOCH FROM MAX(time)) * 1000 as max_ts,
-                        COUNT(*) as candle_count
-                    FROM enhanced_candles
-                    WHERE symbol = ANY(:assets) AND timeframe = ANY(:timeframes)
-                    GROUP BY symbol, timeframe
-                """),
-                {"assets": assets, "timeframes": timeframes},
-            )
-            rows = result.fetchall()
-        except Exception as e:
-            print(f"[Backtest] Batched range query failed: {e}")
-            return windows
-
-        # Build lookup table: (asset, timeframe) -> (min_ts, max_ts, count)
-        data_ranges = {}
-        for row in rows:
-            symbol, tf, min_ts, max_ts, count = row
-            if min_ts is not None and max_ts is not None:
-                data_ranges[(symbol, tf)] = (int(min_ts), int(max_ts), int(count or 0))
-
-        # Generate random windows for each asset/timeframe with available data
-        for timeframe in timeframes:
-            if timeframe not in self.TIMEFRAME_CONFIG:
+            # Skip if agent already tested this window
+            if window_key in tested_window_keys:
                 continue
 
-            config = self.TIMEFRAME_CONFIG[timeframe]
-            window_candles = config["candles"]
-            window_ms = window_candles * tf_ms.get(timeframe, 3_600_000)
+            windows.append({
+                "asset": w.symbol,
+                "timeframe": w.timeframe,
+                "start_ts": w.start_ts,
+                "end_ts": w.end_ts,
+                "regime": f"random_{w.timeframe}",
+            })
 
-            for asset in assets:
-                key = (asset, timeframe)
-                if key not in data_ranges:
-                    continue
+            if len(windows) >= count:
+                break
 
-                min_ts, max_ts, candle_count = data_ranges[key]
-                available_range = max_ts - min_ts - window_ms
-
-                # Skip if not enough data
-                if available_range <= 0 or candle_count < window_candles:
-                    continue
-
-                # Generate random windows for this asset/timeframe
-                for _ in range(self.WINDOWS_PER_ASSET_PER_TF):
-                    start_ts = min_ts + random.randint(0, int(available_range))
-                    end_ts = start_ts + window_ms
-                    windows.append(
-                        {
-                            "asset": asset,
-                            "timeframe": timeframe,
-                            "start_ts": start_ts,
-                            "end_ts": end_ts,
-                            "regime": f"random_{timeframe}",
-                        }
-                    )
+        stats = get_pool_stats()
+        skipped = len(tested_window_keys) if tested_window_keys else 0
+        print(f"[Backtest] Selected {len(windows)} windows from pool of {stats['pool_size']} (skipped {skipped} already tested)")
 
         return windows
 
@@ -181,28 +168,31 @@ class AgentBacktestService:
         assets: list[str],
         timeframes: list[str] = None,
         include_canonical: bool = True,
+        agent_id: str = None,
     ) -> list[dict]:
         """
-        Get ALL test windows: random windows + canonical periods.
+        Get test windows from pool + canonical periods.
 
         This ensures agents are tested on:
-        1. Random windows across all timeframes (diverse market conditions)
+        1. Random windows from pool (~50 per run, skipping already-tested)
         2. Canonical periods (FTX collapse, COVID crash, 2017 bull, etc.)
 
         Returns windows grouped by regime for per-regime fitness tracking.
         """
         all_windows = []
 
-        # 1. Generate random windows across timeframes
-        random_windows = await self._generate_random_windows(session, assets, timeframes)
+        # 1. Get random windows from pre-generated pool (skips already-tested)
+        random_windows = await self._get_windows_from_pool(
+            session,
+            agent_id=agent_id,
+            count=self.WINDOWS_PER_BACKTEST,
+        )
         all_windows.extend(random_windows)
 
-        # 2. Add canonical periods (historical events)
+        # 2. Add canonical periods (historical events) - limited per regime
         if include_canonical:
             # Get canonical periods for these assets
-            # Filter to available timeframes (default to 1h which has best coverage)
             canonical_timeframes = timeframes or ["1h"]
-            # Use only 1h for canonical periods - they're defined by dates, not candle counts
             canonical_tf = "1h" if "1h" in canonical_timeframes else canonical_timeframes[0]
 
             canonical = get_canonical_periods_for_backtesting(
@@ -211,24 +201,26 @@ class AgentBacktestService:
                 regimes=None,  # All regimes: crash, bull, bear, blowoff, recovery, sideways
             )
 
-            # Convert to window format
+            # Limit canonical windows per regime to avoid overwhelming random windows
+            regime_counts = {}
             for period in canonical:
-                all_windows.append(
-                    {
-                        "asset": period["asset"],
-                        "timeframe": period["timeframe"],
-                        "start_ts": period["start_ts"],
-                        "end_ts": period["end_ts"],
-                        "regime": period["regime"],  # crash, bull, bear, etc.
-                        "period_name": period["name"],
-                        "description": period.get("description", ""),
-                    }
-                )
+                regime = period["regime"]
+                if regime_counts.get(regime, 0) >= self.CANONICAL_WINDOWS_PER_REGIME:
+                    continue
+                regime_counts[regime] = regime_counts.get(regime, 0) + 1
 
-            print(
-                f"[Backtest] Added {len(canonical)} canonical periods across {len(REGIMES)} regimes: "
-                f"{', '.join(REGIMES)}"
-            )
+                all_windows.append({
+                    "asset": period["asset"],
+                    "timeframe": period["timeframe"],
+                    "start_ts": period["start_ts"],
+                    "end_ts": period["end_ts"],
+                    "regime": regime,
+                    "period_name": period["name"],
+                    "description": period.get("description", ""),
+                })
+
+            canonical_added = sum(regime_counts.values())
+            print(f"[Backtest] Added {canonical_added} canonical periods (max {self.CANONICAL_WINDOWS_PER_REGIME}/regime)")
 
         # Summary
         regime_counts = {}
@@ -276,85 +268,91 @@ class AgentBacktestService:
         result = await session.exec(select(Agent).where(Agent.agent_id.in_(agent_ids)))
         agents = result.all()
 
-        # Get patterns from DB
         from ...Patterns.Models.pattern_models import Pattern
 
-        pattern_result = await session.exec(select(Pattern).where(Pattern.is_active == True))
-        patterns = pattern_result.all()
-
-        # Build pattern lookup
-        pattern_lookup = {
-            p.pattern_id: {
-                "pattern_id": p.pattern_id,
-                "entry_conditions": p.entry_conditions,
-                "exit_conditions": p.exit_conditions,
-            }
-            for p in patterns
-        }
-
-        # OPTIMIZATION: Get windows and preload data ONCE for all agents
+        # Clean asset names (remove /USDT suffix)
         clean_assets = [a.replace("/USDT", "").replace("-USD", "") for a in assets]
-        all_windows = await self._get_all_test_windows(
-            session,
-            assets=clean_assets,
-            timeframes=self.DEFAULT_TIMEFRAMES,
-            include_canonical=True,
-        )
-
-        # Preload candle data for all windows (avoids repeated DB queries)
-        preloaded_candles = {}
-        if all_windows:
-            # Convert windows to format expected by preload function
-            from dataclasses import dataclass
-
-            @dataclass
-            class WindowAdapter:
-                symbol: str
-                timeframe: str
-                start_ts: int
-                end_ts: int
-
-            window_adapters = [
-                WindowAdapter(
-                    symbol=w["asset"],
-                    timeframe=w.get("timeframe", timeframe),
-                    start_ts=w["start_ts"],
-                    end_ts=w["end_ts"],
-                )
-                for w in all_windows
-            ]
-
-            print(f"[Backtest] Preloading data for {len(all_windows)} windows...")
-            preloaded_candles = preload_candles_for_windows(window_adapters, self.loader)
-            print(f"[Backtest] Preloaded {len(preloaded_candles)} asset/timeframe pairs")
 
         for agent in agents:
+            # Get windows for THIS agent (skips windows agent has already tested)
+            all_windows = await self._get_all_test_windows(
+                session,
+                assets=clean_assets,
+                timeframes=self.DEFAULT_TIMEFRAMES,
+                include_canonical=True,
+                agent_id=agent.agent_id,  # Pass agent ID to skip tested windows
+            )
+
+            # Preload candle data for this agent's windows
+            preloaded_candles = {}
+            if all_windows:
+                from dataclasses import dataclass
+
+                @dataclass
+                class WindowAdapter:
+                    symbol: str
+                    timeframe: str
+                    start_ts: int
+                    end_ts: int
+
+                window_adapters = [
+                    WindowAdapter(
+                        symbol=w["asset"],
+                        timeframe=w.get("timeframe", timeframe),
+                        start_ts=w["start_ts"],
+                        end_ts=w["end_ts"],
+                    )
+                    for w in all_windows
+                ]
+
+                preloaded_candles = preload_candles_for_windows(window_adapters, self.loader)
+
             try:
-                # Get agent's patterns - handle both old (list) and new (dict) formats
+                # Extract agent's patterns using hydrate-once pattern:
+                # - Embedded patterns (have entry_conditions) → use directly
+                # - Reference IDs (strings) → query only those IDs, persist back
                 agent_patterns = []
+                reference_ids = []
                 assigned = agent.assigned_patterns or {}
 
-                # Extract pattern IDs from assigned_patterns
                 if isinstance(assigned, dict):
-                    # New format: {"base": [...], "situational": [...]}
                     base_patterns = assigned.get("base", [])
                     for p in base_patterns:
                         if isinstance(p, str):
-                            # Old: just pattern ID
-                            if p in pattern_lookup:
-                                agent_patterns.append(pattern_lookup[p])
+                            reference_ids.append(p)
                         elif isinstance(p, dict):
-                            # New: full pattern dict - use it directly if has conditions
-                            pid = p.get("pattern_id", p.get("id", ""))
                             if p.get("entry_conditions") and p.get("exit_conditions"):
                                 agent_patterns.append(p)
-                            elif pid in pattern_lookup:
-                                agent_patterns.append(pattern_lookup[pid])
+                            else:
+                                pid = p.get("pattern_id", p.get("id", ""))
+                                if pid:
+                                    reference_ids.append(pid)
                 elif isinstance(assigned, list):
-                    # Legacy format: just a list of pattern IDs
-                    for pattern_id in assigned:
-                        if pattern_id in pattern_lookup:
-                            agent_patterns.append(pattern_lookup[pattern_id])
+                    for item in assigned:
+                        if isinstance(item, str):
+                            reference_ids.append(item)
+
+                # Hydrate reference IDs (only query what we need)
+                if reference_ids:
+                    pattern_result = await session.exec(
+                        select(Pattern).where(Pattern.pattern_id.in_(reference_ids))
+                    )
+                    fetched_patterns = pattern_result.all()
+
+                    for p in fetched_patterns:
+                        hydrated = {
+                            "pattern_id": p.pattern_id,
+                            "name": p.name,
+                            "entry_conditions": p.entry_conditions,
+                            "exit_conditions": p.exit_conditions,
+                        }
+                        agent_patterns.append(hydrated)
+
+                    # Persist hydrated patterns back to agent
+                    if fetched_patterns:
+                        agent.assigned_patterns = {"base": agent_patterns}
+                        session.add(agent)
+                        print(f"[Backtest] {agent.agent_id[:8]}: Hydrated {len(fetched_patterns)} pattern refs")
 
                 if not agent_patterns:
                     print(f"Agent {agent.agent_id} has no valid patterns, skipping")
@@ -470,6 +468,7 @@ class AgentBacktestService:
                             all_trades,
                             source="evolution_backtest",
                             timeframe=timeframe,
+                            fetch_indicators=True,  # Enable for pattern discovery
                         )
                         if trades_persisted == 0 and len(all_trades) > 0:
                             print(
@@ -769,3 +768,231 @@ class AgentBacktestService:
 
         # Bound to [0, 100]
         return max(0.0, min(100.0, weighted_fitness))
+
+    async def backtest_agent_on_windows(
+        self,
+        session: AsyncSession,
+        agent,
+        windows: list[dict],
+        preloaded_candles: dict = None,
+    ) -> dict:
+        """
+        Test a single agent on pre-loaded windows (used by orchestrator).
+
+        This is called by the orchestrator to test agents one at a time
+        on windows that have already been loaded. This avoids loading
+        candle data multiple times.
+
+        Args:
+            session: Database session
+            agent: Agent model object
+            windows: List of window dicts with asset/timeframe/start_ts/end_ts
+            preloaded_candles: Dict of (symbol, timeframe, start_ts) -> DataFrame
+
+        Returns:
+            Dict with test results
+        """
+        import time
+
+        from ...Patterns.Models.pattern_models import Pattern
+
+        agent_start = time.time()
+        aid = agent.agent_id
+        aname = agent.name or aid[:8]  # Use name if available, else short ID
+
+        # Extract agent's patterns using hydrate-once pattern:
+        # - Embedded patterns (have entry_conditions) → use directly, no DB query
+        # - Reference IDs (strings) → query only those IDs, then persist back to agent
+        agent_patterns = []
+        reference_ids = []  # Pattern IDs that need DB lookup
+        assigned = agent.assigned_patterns or {}
+
+        # First pass: collect embedded patterns and reference IDs
+        if isinstance(assigned, dict):
+            base_patterns = assigned.get("base", [])
+            for p in base_patterns:
+                if isinstance(p, str):
+                    reference_ids.append(p)
+                elif isinstance(p, dict):
+                    if p.get("entry_conditions") and p.get("exit_conditions"):
+                        agent_patterns.append(p)
+                    else:
+                        # Dict but missing conditions - treat as reference
+                        pid = p.get("pattern_id", p.get("id", ""))
+                        if pid:
+                            reference_ids.append(pid)
+        elif isinstance(assigned, list):
+            for item in assigned:
+                if isinstance(item, str):
+                    reference_ids.append(item)
+
+        # Second pass: hydrate reference IDs (only query what we need)
+        if reference_ids:
+            pattern_result = await session.exec(
+                select(Pattern).where(Pattern.pattern_id.in_(reference_ids))
+            )
+            fetched_patterns = pattern_result.all()
+
+            for p in fetched_patterns:
+                hydrated = {
+                    "pattern_id": p.pattern_id,
+                    "name": p.name,
+                    "entry_conditions": p.entry_conditions,
+                    "exit_conditions": p.exit_conditions,
+                }
+                agent_patterns.append(hydrated)
+
+            # Mark that we need to persist hydrated patterns (defer session.add to avoid flush conflicts)
+            patterns_were_hydrated = len(fetched_patterns) > 0
+            if patterns_were_hydrated:
+                agent.assigned_patterns = {"base": agent_patterns}
+                print(f"[AgentTest] {aname}: Hydrated {len(fetched_patterns)} pattern refs → embedded")
+
+        if not agent_patterns:
+            print(f"[AgentTest] {aid[:8]}: No valid patterns, skipping")
+            return {"agent_id": aid, "error": "No valid patterns"}
+
+        # Create backtest config from agent traits
+        traits_dict = agent.traits if isinstance(agent.traits, dict) else agent.traits.__dict__
+
+        from dataclasses import fields as dataclass_fields
+        known_fields = {f.name for f in dataclass_fields(AgentTraits)}
+        filtered_traits = {k: v for k, v in traits_dict.items() if k in known_fields}
+
+        agent_traits = AgentTraits(**filtered_traits)
+        config = BacktestConfig.from_traits(agent_traits)
+
+        # Build pattern dict for engine
+        pattern_dict = {p["pattern_id"]: p for p in agent_patterns}
+
+        # Create AgentRecord for the backtest engine
+        agent_record = AgentRecord(
+            agent_id=agent.agent_id,
+            agent_name=agent.name,
+            generation=agent.generation,
+            traits=traits_dict,
+            pattern_ids=[p["pattern_id"] for p in agent_patterns],
+            pattern_weights=agent.pattern_weights or {},
+            trading_philosophy=agent.trading_philosophy or "",
+        )
+
+        # Create backtest engine with preloaded candles
+        engine = LocalBacktestEngine(
+            loader=self.loader,
+            config=config,
+            patterns=pattern_dict,
+            ai_zone_mode=AIZoneMode.LLM,
+            preloaded_candles=preloaded_candles,
+        )
+
+        # Run backtest for each window
+        all_trades = []
+        window_metrics = []
+
+        for window in windows:
+            window_tf = window.get("timeframe", "1h")
+            dataset = {
+                "assets": [window["asset"]],
+                "timeframe": window_tf,
+                "start_ts": window["start_ts"],
+                "end_ts": window["end_ts"],
+            }
+            window_trades = engine.run(agent=agent_record, dataset=dataset)
+            all_trades.extend(window_trades)
+
+            # Calculate metrics for this window
+            raw_regime = window.get("regime", f"random_{window_tf}")
+            regime = "random" if raw_regime.startswith("random_") else raw_regime
+
+            w_metrics = self._calculate_metrics(window_trades)
+            window_metrics.append({
+                "regime": regime,
+                "timeframe": window_tf,
+                "trades": len(window_trades),
+                "fitness": w_metrics.get("fitness_score", 0.0),
+                "sortino": w_metrics.get("sortino_ratio"),
+                "win_rate": w_metrics.get("win_rate"),
+                "roi": w_metrics.get("annualized_roi_pct", 0.0),
+                "pnl": w_metrics.get("total_pnl", 0.0),
+            })
+
+        agent_elapsed = time.time() - agent_start
+
+        # Aggregate metrics
+        total_trades = sum(w["trades"] for w in window_metrics)
+        total_pnl = sum(w["pnl"] for w in window_metrics)
+
+        valid_windows = [w for w in window_metrics if w["trades"] > 0]
+        if valid_windows:
+            total_w = sum(w["trades"] for w in valid_windows)
+            avg_fitness = sum(w["fitness"] * w["trades"] for w in valid_windows) / total_w
+            avg_win_rate = sum((w["win_rate"] or 0) * w["trades"] for w in valid_windows) / total_w
+            sortino_windows = [w for w in valid_windows if w["sortino"] is not None]
+            avg_sortino = sum(w["sortino"] for w in sortino_windows) / len(sortino_windows) if sortino_windows else None
+        else:
+            avg_fitness = 0.0
+            avg_win_rate = None
+            avg_sortino = None
+
+        # Update agent in DB (agent is already tracked, no need to add)
+        # Convert to proper types to avoid Decimal + float errors
+        from decimal import Decimal
+        agent.fitness_score = float(avg_fitness) if avg_fitness else 0.0
+        agent.sortino_ratio = float(avg_sortino) if avg_sortino else None
+        agent.win_rate = float(avg_win_rate) if avg_win_rate else None
+        agent.total_trades = int(agent.total_trades or 0) + int(total_trades)
+        agent.total_pnl = Decimal(str(float(agent.total_pnl or 0) + float(total_pnl)))
+        agent.backtest_count = int(agent.backtest_count or 0) + 1
+        agent.last_backtest_at = datetime.utcnow()
+        # Note: agent is already tracked by session from the initial query
+        # Calling session.add() during autoflush causes warnings
+
+        # MEMORY CREATION: Create memories from significant trade outcomes
+        # Use no_autoflush to prevent SQLAlchemy warnings about session.add() during flush
+        if all_trades and total_trades >= 5:
+            try:
+                from .memory_integration_service import (
+                    create_memories_from_trades,
+                    maybe_trigger_memory_review,
+                )
+
+                # Create memories from aggregate results (not per-window to avoid spam)
+                aggregate_trades = [
+                    {
+                        "pnl_pct": getattr(t, "pnl_pct", 0),
+                        "pattern_id": getattr(t, "pattern_id", "unknown"),
+                        "trade_id": getattr(t, "trade_id", ""),
+                    }
+                    for t in all_trades
+                ]
+                # Use dominant regime from window metrics
+                dominant_regime = max(window_metrics, key=lambda w: w["trades"])["regime"] if window_metrics else "random"
+                dominant_tf = max(window_metrics, key=lambda w: w["trades"])["timeframe"] if window_metrics else "1h"
+
+                # Use no_autoflush context to prevent session.add() during flush warnings
+                async with session.no_autoflush:
+                    await create_memories_from_trades(
+                        session=session,
+                        agent_id=aid,
+                        trades=aggregate_trades,
+                        regime=dominant_regime,
+                        timeframe=dominant_tf,
+                    )
+
+                    # Check if memory review should be triggered (every 50 backtests)
+                    await maybe_trigger_memory_review(
+                        session=session,
+                        agent_id=aid,
+                        backtest_count=agent.backtest_count,
+                    )
+            except Exception as e:
+                print(f"[AgentTest] Memory creation failed for {aid[:8]}: {e}")
+
+        print(f"[AgentTest] {aid[:8]}: fitness={avg_fitness:.1f}, trades={total_trades}, windows={len(windows)} ({agent_elapsed:.1f}s)")
+
+        return {
+            "agent_id": aid,
+            "fitness": avg_fitness,
+            "total_trades": total_trades,
+            "windows_tested": len(windows),
+        }

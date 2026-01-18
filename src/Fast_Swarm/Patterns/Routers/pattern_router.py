@@ -98,7 +98,7 @@ async def get_pattern_leaderboard(
     )
 
 
-@router.get("/", response_model=list[Pattern])
+@router.get("", response_model=list[Pattern])
 async def read_patterns(skip: int = 0, limit: int = 100, session: AsyncSession = Depends(get_session)):
     """
     Get all patterns, ordered by fitness score.

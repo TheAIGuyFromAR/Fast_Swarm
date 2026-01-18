@@ -1,0 +1,28 @@
+{
+  "agent_id": "canonical-conservative_reversal-999",
+  "trait_hash": "9ee94f6b90845652efc534676d00086b463f9670b8a7b65afbec555ac3e75b88",
+  "traits": {
+    "adaptability": 0.8805034740545487,
+    "breakout_preference": 0.6312977254563937,
+    "correlation_awareness": 0.7021020857946083,
+    "drawdown_sensitivity": 0.9,
+    "entry_aggression": 0.3,
+    "exit_aggression": 0.8,
+    "funding_rate_sensitivity": 0.5709388856079097,
+    "hold_duration_bias": 0.0800656147037001,
+    "lookback_preference": 0.09741317216713707,
+    "mean_reversion": 0.9,
+    "momentum_vs_reversion": 0.1,
+    "news_reactivity": 0.18800297490626083,
+    "patience": 0.85,
+    "profit_target_greed": 0.5737552086539675,
+    "risk_tolerance": 0.2,
+    "sentiment_contrarian": 0.2645837960743396,
+    "sentiment_weight": 0.9943765911278659,
+    "stop_loss_tightness": 0.31811766060971236,
+    "trend_following": 0.985529318074106,
+    "volatility_seeking": 0.8724924964292878,
+    "volume_sensitivity": 0.07486250452546173,
+    "win_rate_preference": 0.49055580409903243
+  }
+}

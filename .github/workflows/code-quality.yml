@@ -75,7 +75,7 @@ jobs:
         python-version: "3.12"
 
     - name: Install bandit
-      run: pip install bandit[toml]
+      run: pip install "bandit[toml]>=1.7.8"
 
     - name: Run Bandit security scan
       run: |
@@ -83,4 +83,4 @@ jobs:
           --exclude "./.git,./venv,./.venv,./tmpclaude-*,./.hypothesis" \
           --severity-level medium \
           --confidence-level medium \
-          -f github
+          -f txt

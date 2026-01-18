@@ -1,0 +1,129 @@
+{
+  "version": "1.0.0",
+  "description": "Performance contracts (SLOs) for Fast_Swarm",
+  "created": "2024-01-12",
+  "contracts": {
+    "fitness": {
+      "fitness_10_trades": {
+        "max_ms": 10,
+        "description": "Fitness calculation with 10 trades",
+        "priority": "HIGH"
+      },
+      "fitness_100_trades": {
+        "max_ms": 50,
+        "description": "Fitness calculation with 100 trades",
+        "priority": "HIGH"
+      },
+      "fitness_1000_trades": {
+        "max_ms": 200,
+        "description": "Fitness calculation with 1,000 trades",
+        "priority": "CRITICAL"
+      },
+      "fitness_10000_trades": {
+        "max_ms": 1000,
+        "description": "Fitness calculation with 10,000 trades",
+        "priority": "MEDIUM"
+      }
+    },
+    "ranking": {
+      "ranking_100_agents": {
+        "max_ms": 50,
+        "description": "Rank 100 agents by fitness",
+        "priority": "HIGH"
+      },
+      "ranking_1000_agents": {
+        "max_ms": 100,
+        "description": "Rank 1,000 agents by fitness",
+        "priority": "CRITICAL"
+      },
+      "ranking_10000_agents": {
+        "max_ms": 500,
+        "description": "Rank 10,000 agents by fitness",
+        "priority": "MEDIUM"
+      }
+    },
+    "sorting": {
+      "sort_100_agents": {
+        "max_ms": 5,
+        "description": "Sort 100 agents",
+        "priority": "HIGH"
+      },
+      "sort_1000_agents": {
+        "max_ms": 20,
+        "description": "Sort 1,000 agents",
+        "priority": "HIGH"
+      },
+      "sort_10000_agents": {
+        "max_ms": 200,
+        "description": "Sort 10,000 agents",
+        "priority": "MEDIUM"
+      }
+    },
+    "culling": {
+      "cull_selection_1000_agents": {
+        "max_ms": 100,
+        "description": "Select agents to cull from 1,000",
+        "priority": "HIGH"
+      },
+      "cull_selection_10000_agents": {
+        "max_ms": 500,
+        "description": "Select agents to cull from 10,000",
+        "priority": "MEDIUM"
+      }
+    },
+    "traits": {
+      "trait_generation": {
+        "max_ms": 1,
+        "description": "Generate full 22-trait set",
+        "priority": "HIGH"
+      },
+      "trait_crossover": {
+        "max_ms": 1,
+        "description": "Crossover two trait sets",
+        "priority": "HIGH"
+      },
+      "trait_mutation_batch_100": {
+        "max_ms": 10,
+        "description": "Mutate 100 trait sets",
+        "priority": "MEDIUM"
+      }
+    },
+    "evolution": {
+      "evolution_selection_1000": {
+        "max_ms": 200,
+        "description": "Select breeders/survivors from 1,000 agents",
+        "priority": "CRITICAL"
+      }
+    },
+    "memory": {
+      "memory_1000_agents": {
+        "max_mb": 50,
+        "description": "Memory for 1,000 agent objects",
+        "priority": "HIGH"
+      },
+      "memory_10000_agents": {
+        "max_mb": 500,
+        "description": "Memory for 10,000 agent objects",
+        "priority": "MEDIUM"
+      },
+      "memory_100000_trades": {
+        "max_mb": 100,
+        "description": "Memory for 100,000 trade objects",
+        "priority": "LOW"
+      }
+    }
+  },
+  "thresholds": {
+    "warning_multiplier": 0.8,
+    "critical_multiplier": 1.0,
+    "regression_threshold_percent": 10
+  },
+  "notes": [
+    "All timing contracts measured on reference hardware (avg of 10 runs after warmup)",
+    "Memory contracts are approximate (Python memory management is complex)",
+    "CRITICAL priority: Must pass before merge",
+    "HIGH priority: Should pass, investigate if fail",
+    "MEDIUM priority: Nice to have, track trends",
+    "LOW priority: Informational only"
+  ]
+}

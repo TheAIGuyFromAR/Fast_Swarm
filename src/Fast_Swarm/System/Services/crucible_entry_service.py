@@ -1,13 +1,24 @@
 """
 Crucible Entry Service - Handle agent entry into the Crucible.
 
-Triggers when an agent reaches level 15-20, and every 5 levels thereafter.
+Entry eligibility (first entry) - EITHER condition qualifies:
+- Generation >= 3 (evolved agents have battle-tested traits), OR
+- Level >= dynamic threshold (starts at 5, scales up as crucible fills)
+
+Dynamic threshold scaling (for level-based entry):
+- Starts at level 5 to seed the system quickly
+- Scales up as more entries accumulate (10 entries -> level 10, 50 -> level 15)
+- Every 50 additional entries, threshold increases by 5 (max 30)
+
+Subsequent entries: Every 5 levels after first entry (all generations).
+
 Creates a frozen snapshot of the agent for mass walk-forward validation.
 """
 
 import uuid
 from datetime import datetime
 
+from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
@@ -18,6 +29,36 @@ from ..Models.crucible_models import CrucibleEntry
 class CrucibleEntryService:
     """Service for managing entry into the Crucible."""
 
+    async def _get_dynamic_threshold(self, session: AsyncSession) -> int:
+        """
+        Calculate dynamic first-entry threshold based on total Crucible entries.
+
+        Scaling:
+        - 0-9 entries: level 5
+        - 10-49 entries: level 10
+        - 50-99 entries: level 15
+        - 100-149 entries: level 20
+        - 150-199 entries: level 25
+        - 200+ entries: level 30 (max)
+        """
+        count_result = await session.execute(
+            select(func.count()).select_from(CrucibleEntry)
+        )
+        total_entries = count_result.scalar() or 0
+
+        if total_entries < 10:
+            return 5
+        elif total_entries < 50:
+            return 10
+        elif total_entries < 100:
+            return 15
+        elif total_entries < 150:
+            return 20
+        elif total_entries < 200:
+            return 25
+        else:
+            return 30
+
     async def check_and_enter_crucible(
         self,
         session: AsyncSession,
@@ -26,11 +67,12 @@ class CrucibleEntryService:
         """
         Check if an agent is eligible for Crucible and create an entry if so.
 
-        Thresholds:
-        - First entry: Level 15 (or configurable 15-20)
-        - Subsequent: Every 5 levels after the first entry
+        First entry eligibility (EITHER qualifies):
+        - Generation >= 3 (evolved agents), OR
+        - Level >= dynamic threshold (5 -> 10 -> 15 -> ... -> 30 max)
+
+        Subsequent entries: Every 5 levels after first entry.
         """
-        # Get agent
         result = await session.exec(select(Agent).where(Agent.agent_id == agent_id))
         agent = result.first()
 
@@ -38,11 +80,9 @@ class CrucibleEntryService:
             return None
 
         level = agent.level or 1
-
-        # Eligibility logic
+        generation = agent.generation or 1
         is_eligible = False
 
-        # Get existing entries for this agent to check frequency
         entry_result = await session.exec(
             select(CrucibleEntry)
             .where(CrucibleEntry.agent_id == agent_id)
@@ -51,11 +91,12 @@ class CrucibleEntryService:
         existing_entries = entry_result.all()
 
         if not existing_entries:
-            # First time entry threshold
-            if level >= 15:
+            # First entry: Gen 3+ OR Level >= threshold
+            level_threshold = await self._get_dynamic_threshold(session)
+            if generation >= 3 or level >= level_threshold:
                 is_eligible = True
         else:
-            # Subsequent entry every 5 levels
+            # Subsequent entries: Every 5 levels after last entry
             last_entry_level = existing_entries[0].level_at_entry
             if level >= last_entry_level + 5:
                 is_eligible = True
@@ -81,7 +122,8 @@ class CrucibleEntryService:
         await session.commit()
         await session.refresh(entry)
 
-        print(f"[Crucible] Agent {agent_id} entered Crucible at level {level}")
+        reason = f"gen {generation}" if generation >= 3 else f"level {level}"
+        print(f"[Crucible] Agent {agent_id[:8]} entered Crucible ({reason})")
         return entry
 
     async def get_pending_entries(self, session: AsyncSession) -> list[CrucibleEntry]:

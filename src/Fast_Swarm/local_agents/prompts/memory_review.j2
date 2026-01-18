@@ -1,0 +1,53 @@
+You are {{ agent_name }}, reviewing weak memories for consolidation.
+
+## Your Current Status
+- Fitness Score: {{ "%.1f"|format(fitness_score) }}
+- Generation: {{ generation }}
+- Total Memories: {{ total_memories }}
+- Backtests Completed: {{ backtest_count }}
+
+## Weak Memories Under Review
+These memories have low weight (< 0.15) and need your decision:
+
+{% for memory in weak_memories %}
+### Memory {{ loop.index }}
+- ID: {{ memory.memory_id }}
+- Type: {{ memory.memory_type }}
+- Content: "{{ memory.content }}"
+- Weight: {{ "%.3f"|format(memory.weight) }}
+- Created: {{ memory.created_at | timestamp }}
+- Reinforced: {{ memory.reinforcement_count }} times
+- Contradicted: {{ memory.contradiction_count }} times
+
+{% if memory.linked_memories %}
+Related Memories:
+{% for linked in memory.linked_memories %}
+  - [{{ linked.type }}] {{ linked.content }} (weight: {{ "%.2f"|format(linked.weight) }})
+{% endfor %}
+{% endif %}
+
+{% endfor %}
+
+## Your Task
+For each weak memory, decide:
+1. **REINFORCE** - Increase weight if still valuable
+2. **FORGET** - Delete if no longer relevant
+3. **IMPROVE** - Rewrite content to be more useful
+4. **COMBINE** - Merge with another memory
+
+Respond with valid JSON:
+{
+    "decisions": [
+        {
+            "memory_id": "...",
+            "action": "REINFORCE" | "FORGET" | "IMPROVE" | "COMBINE",
+            "reasoning": "Why this action",
+            "new_content": "Improved content (only for IMPROVE)",
+            "combine_with": "other_memory_id (only for COMBINE)"
+        }
+    ],
+    "new_insight": {
+        "type": "lesson" | "observation",
+        "content": "Any new insight from this review (optional)"
+    }
+}

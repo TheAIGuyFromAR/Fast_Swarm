@@ -27,7 +27,7 @@ MIN_ELO_WEIGHT = 0.5  # Minimum ELO weight (even low-ELO agents matter)
 
 
 async def get_all_committees(session: AsyncSession):
-    statement = select(Committee).where(Committee.is_active == True)
+    statement = select(Committee).where(Committee.is_active.is_(True))
     result = await session.exec(statement)
     return result.all()
 

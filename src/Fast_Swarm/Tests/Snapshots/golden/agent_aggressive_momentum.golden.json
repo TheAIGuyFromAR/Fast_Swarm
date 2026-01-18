@@ -1,0 +1,28 @@
+{
+  "agent_id": "canonical-aggressive_momentum-123",
+  "trait_hash": "a3611a60dfd6be46955b4ca759a91f84f468f5b8c9c399f5dc7031bfa9462590",
+  "traits": {
+    "adaptability": 0.06987696145918243,
+    "breakout_preference": 0.9053986522844989,
+    "correlation_awareness": 0.08761349975042287,
+    "drawdown_sensitivity": 0.0381536661023224,
+    "entry_aggression": 0.85,
+    "exit_aggression": 0.7,
+    "funding_rate_sensitivity": 0.4362757934152184,
+    "hold_duration_bias": 0.08718667752263232,
+    "lookback_preference": 0.3372166571092755,
+    "mean_reversion": 0.44832170830694373,
+    "momentum_vs_reversion": 0.95,
+    "news_reactivity": 0.24516335251761112,
+    "patience": 0.5975994644879905,
+    "profit_target_greed": 0.10770023493843905,
+    "risk_tolerance": 0.9,
+    "sentiment_contrarian": 0.0016705535792228554,
+    "sentiment_weight": 0.3337963946289553,
+    "stop_loss_tightness": 0.33219769850967984,
+    "trend_following": 0.9,
+    "volatility_seeking": 0.8,
+    "volume_sensitivity": 0.09276456137849509,
+    "win_rate_preference": 0.9011988779516946
+  }
+}
