@@ -114,7 +114,7 @@ async def create_memories_from_trades(
             agent_id=agent_id,
             memory_type=MemoryType.AFFIRMATION,
             content=f"Winning streak of {win_streak} trades in {regime} regime on {timeframe}. "
-                    f"Trust this setup when conditions align.",
+            f"Trust this setup when conditions align.",
             weight=0.7 + (win_streak * 0.05),  # Higher weight for longer streaks
             confidence=0.8,
             context_snapshot={
@@ -134,7 +134,7 @@ async def create_memories_from_trades(
             agent_id=agent_id,
             memory_type=MemoryType.REGRET,
             content=f"Loss streak of {loss_streak} trades in {regime} regime on {timeframe}. "
-                    f"Be more cautious in similar conditions.",
+            f"Be more cautious in similar conditions.",
             weight=0.7 + (loss_streak * 0.05),
             confidence=0.8,
             context_snapshot={
@@ -156,7 +156,7 @@ async def create_memories_from_trades(
             agent_id=agent_id,
             memory_type=MemoryType.LESSON,
             content=f"Big win ({pnl_pct:.1f}%) with pattern {pattern_id[:8]} in {regime} {timeframe}. "
-                    f"This pattern works well in these conditions.",
+            f"This pattern works well in these conditions.",
             weight=0.7,
             confidence=0.9,
             linked_trade_ids=[trade.get("trade_id", "")],
@@ -178,7 +178,7 @@ async def create_memories_from_trades(
             agent_id=agent_id,
             memory_type=MemoryType.REGRET,
             content=f"Big loss ({pnl_pct:.1f}%) with pattern {pattern_id[:8]} in {regime} {timeframe}. "
-                    f"Avoid this pattern in similar conditions.",
+            f"Avoid this pattern in similar conditions.",
             weight=0.8,
             confidence=0.9,
             linked_trade_ids=[trade.get("trade_id", "")],
@@ -201,7 +201,7 @@ async def create_memories_from_trades(
             agent_id=agent_id,
             memory_type=MemoryType.OBSERVATION,
             content=f"In {regime} regime on {timeframe}: {len(trades)} trades, "
-                    f"{win_rate*100:.0f}% win rate, {total_pnl:.1f}% total PnL.",
+            f"{win_rate * 100:.0f}% win rate, {total_pnl:.1f}% total PnL.",
             weight=0.3,
             confidence=0.7,
             context_snapshot={
@@ -260,9 +260,7 @@ async def inherit_memories_on_spawn(
 
     if inherited:
         await session.commit()
-        logger.info(
-            f"[Memory] Inherited {len(inherited)} memories from {parent_id[:8]} to {child_id[:8]}"
-        )
+        logger.info(f"[Memory] Inherited {len(inherited)} memories from {parent_id[:8]} to {child_id[:8]}")
 
     return len(inherited)
 
@@ -295,12 +293,8 @@ async def inherit_memories_from_both_parents(
     # Higher condensation when inheriting from two parents
     dual_condensation = min(1.0, condensation_rate + 0.2)
 
-    count_a = await inherit_memories_on_spawn(
-        session, parent_a_id, child_id, dual_condensation, decay_rate
-    )
-    count_b = await inherit_memories_on_spawn(
-        session, parent_b_id, child_id, dual_condensation, decay_rate
-    )
+    count_a = await inherit_memories_on_spawn(session, parent_a_id, child_id, dual_condensation, decay_rate)
+    count_b = await inherit_memories_on_spawn(session, parent_b_id, child_id, dual_condensation, decay_rate)
 
     return count_a + count_b
 

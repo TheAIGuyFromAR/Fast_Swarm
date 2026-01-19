@@ -535,7 +535,7 @@ class AgentBacktestService:
 
                 # AGGREGATE by regime: group window metrics, average
                 fitness_by_regime = {}
-                unique_regimes = set(w["regime"] for w in window_metrics)
+                unique_regimes = {w["regime"] for w in window_metrics}
                 for regime in unique_regimes:
                     regime_windows = [w for w in window_metrics if w["regime"] == regime and w["trades"] > 0]
                     regime_trades = sum(w["trades"] for w in regime_windows)
@@ -572,7 +572,7 @@ class AgentBacktestService:
                 fitness_matrix = {}
                 for regime in unique_regimes:
                     regime_windows = [w for w in window_metrics if w["regime"] == regime]
-                    unique_tfs = set(w["timeframe"] for w in regime_windows)
+                    unique_tfs = {w["timeframe"] for w in regime_windows}
                     fitness_matrix[regime] = {}
                     for tf in unique_tfs:
                         tf_windows = [w for w in regime_windows if w["timeframe"] == tf and w["trades"] > 0]

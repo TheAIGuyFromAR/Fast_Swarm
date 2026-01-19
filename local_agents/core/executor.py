@@ -996,7 +996,7 @@ def run_agent_backtest(
         ai_mode=ai_mode,
     )
 
-    for candle, indicators in zip(candles, indicators_list):
+    for candle, indicators in zip(candles, indicators_list, strict=False):
         executor.process_candle(candle, indicators, asset)
 
         if executor.state == AgentState.DEAD:

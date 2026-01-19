@@ -142,7 +142,7 @@ def format_entry_prompt(pattern_conditions: list, indicators: dict, regime: str)
     def to_float(val, default=0):
         try:
             return float(val) if val is not None else default
-        except:
+        except Exception:
             return default
 
     # Get key indicators

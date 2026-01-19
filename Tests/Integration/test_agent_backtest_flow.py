@@ -95,8 +95,9 @@ class TestPostgreSQLDataAvailability:
     @pytest.mark.asyncio
     async def test_enhanced_candles_exist(self, db_session: AsyncSession):
         """Verify enhanced_candles table has data."""
-        from Fast_Swarm.Infrastructure.Models.market_data_models import EnhancedCandle
         from sqlalchemy import func
+
+        from Fast_Swarm.Infrastructure.Models.market_data_models import EnhancedCandle
 
         result = await db_session.exec(select(func.count()).select_from(EnhancedCandle))
         count = result.one()
@@ -108,8 +109,9 @@ class TestPostgreSQLDataAvailability:
     @pytest.mark.asyncio
     async def test_btc_data_available(self, db_session: AsyncSession):
         """Verify BTC data is available for backtesting."""
-        from Fast_Swarm.Infrastructure.Models.market_data_models import EnhancedCandle
         from sqlalchemy import func
+
+        from Fast_Swarm.Infrastructure.Models.market_data_models import EnhancedCandle
 
         result = await db_session.exec(
             select(func.count())

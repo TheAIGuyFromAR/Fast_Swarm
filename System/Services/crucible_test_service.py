@@ -11,14 +11,15 @@ The Crucible is just a more rigorous backtest, not a different scoring system.
 from datetime import datetime
 from typing import Any
 
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import select
+
 from Fast_Swarm.Backtest.Services.backtest_service import (
     calculate_backtest_metrics,
     calculate_metrics_by_regime,
 )
 from Fast_Swarm.local_agents.backtest.engine import create_backtest_engine
 from Fast_Swarm.local_agents.core.state import AgentRecord
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import select
 
 from ..Models.crucible_models import CrucibleEntry
 

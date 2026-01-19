@@ -279,9 +279,7 @@ async def apply_elo_transfers(
 
     for outcome in transfer_result.outcomes:
         # Get coach
-        result = await session.exec(
-            select(Coach).where(Coach.coach_id == outcome.coach_id)
-        )
+        result = await session.exec(select(Coach).where(Coach.coach_id == outcome.coach_id))
         coach = result.first()
 
         if not coach:
@@ -362,9 +360,7 @@ async def apply_agent_elo_transfers(
 
     for instance_id, outcome in agent_votes.items():
         # Get agent instance
-        result = await session.exec(
-            select(AgentInstance).where(AgentInstance.instance_id == instance_id)
-        )
+        result = await session.exec(select(AgentInstance).where(AgentInstance.instance_id == instance_id))
         agent = result.first()
 
         if not agent:
@@ -500,10 +496,7 @@ async def get_coach_elo_history(
     """Get recent ELO transfer history for a coach."""
     result = await session.exec(
         select(ELOTransfer)
-        .where(
-            (ELOTransfer.from_entity_id == coach_id)
-            | (ELOTransfer.to_entity_id == coach_id)
-        )
+        .where((ELOTransfer.from_entity_id == coach_id) | (ELOTransfer.to_entity_id == coach_id))
         .order_by(ELOTransfer.created_at.desc())
         .limit(limit)
     )
@@ -522,30 +515,22 @@ async def get_system_elo_balance(session: AsyncSession) -> dict:
     - net_balance: Should trend toward equilibrium
     """
     # Get all active coaches
-    coaches_result = await session.exec(
-        select(Coach).where(Coach.status == "active")
-    )
+    coaches_result = await session.exec(select(Coach).where(Coach.status == "active"))
     coaches = coaches_result.all()
     total_coach_elo = sum(float(c.elo_rating) for c in coaches)
 
     # Get spawn totals
-    spawn_result = await session.exec(
-        select(ELOTransfer).where(ELOTransfer.transfer_type == "spawn")
-    )
+    spawn_result = await session.exec(select(ELOTransfer).where(ELOTransfer.transfer_type == "spawn"))
     spawns = spawn_result.all()
     total_spawned = sum(float(s.amount) for s in spawns)
 
     # Get tax totals
-    tax_result = await session.exec(
-        select(ELOTransfer).where(ELOTransfer.transfer_type == "tax")
-    )
+    tax_result = await session.exec(select(ELOTransfer).where(ELOTransfer.transfer_type == "tax"))
     taxes = tax_result.all()
     total_taxed = sum(float(t.amount) for t in taxes)
 
     # Get death totals
-    death_result = await session.exec(
-        select(ELOTransfer).where(ELOTransfer.transfer_type == "death_penalty")
-    )
+    death_result = await session.exec(select(ELOTransfer).where(ELOTransfer.transfer_type == "death_penalty"))
     deaths = death_result.all()
     total_deaths = sum(float(d.amount) for d in deaths)
 
@@ -667,18 +652,14 @@ async def process_trade_leg_results(
     from ..Models.coach_models import TradeLeg
 
     # 1. Fetch the trade leg
-    leg_result = await session.exec(
-        select(TradeLeg).where(TradeLeg.leg_id == leg_id)
-    )
+    leg_result = await session.exec(select(TradeLeg).where(TradeLeg.leg_id == leg_id))
     leg = leg_result.first()
 
     if not leg:
         raise ValueError(f"Trade leg not found: {leg_id}")
 
     # 2. Fetch all votes for this leg
-    votes_result = await session.exec(
-        select(HivemindVote).where(HivemindVote.leg_id == leg_id)
-    )
+    votes_result = await session.exec(select(HivemindVote).where(HivemindVote.leg_id == leg_id))
     votes = list(votes_result.all())
 
     if not votes:

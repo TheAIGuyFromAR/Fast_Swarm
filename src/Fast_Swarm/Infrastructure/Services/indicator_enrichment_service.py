@@ -10,7 +10,6 @@ The indicators computed here match what patterns expect from COMPUTED_INDICATORS
 
 import asyncio
 import logging
-from datetime import UTC, datetime
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -225,6 +224,7 @@ async def run_enrichment(
     """
     results = {}
     import time
+
     global_start = time.time()
 
     async with async_session_maker() as session:
@@ -247,7 +247,7 @@ async def run_enrichment(
 
         for idx, (symbol, timeframe) in enumerate(pairs):
             pair_start = time.time()
-            print(f"[Enrichment] [{idx+1}/{total_pairs}] Processing {symbol}/{timeframe}...", flush=True)
+            print(f"[Enrichment] [{idx + 1}/{total_pairs}] Processing {symbol}/{timeframe}...", flush=True)
 
             updated = 0
             batch_num = 0
@@ -267,7 +267,10 @@ async def run_enrichment(
                 total_updated += batch_updated
                 elapsed = time.time() - global_start
                 rate = total_updated / elapsed if elapsed > 0 else 0
-                print(f"  [Batch {batch_num}] +{batch_updated:,} rows | {symbol}/{timeframe}: {updated:,} | Total: {total_updated:,} | Rate: {rate:,.0f}/sec", flush=True)
+                print(
+                    f"  [Batch {batch_num}] +{batch_updated:,} rows | {symbol}/{timeframe}: {updated:,} | Total: {total_updated:,} | Rate: {rate:,.0f}/sec",
+                    flush=True,
+                )
 
             pair_elapsed = time.time() - pair_start
             if updated > 0:
@@ -352,10 +355,12 @@ async def add_derived_columns_if_missing():
     async with async_session_maker() as session:
         for col_name, col_type in columns:
             try:
-                await session.execute(text(f"""
+                await session.execute(
+                    text(f"""
                     ALTER TABLE enhanced_candles
                     ADD COLUMN IF NOT EXISTS {col_name} {col_type}
-                """))
+                """)
+                )
             except Exception as e:
                 logger.warning(f"Column {col_name} may already exist: {e}")
 
@@ -371,15 +376,18 @@ async def startup_enrichment(background: bool = True):
     Args:
         background: Run in background task (default: True)
     """
+
     async def _run():
         # First ensure columns exist
         await add_derived_columns_if_missing()
 
         # Check status
         status = await get_enrichment_status()
-        logger.info(f"[Enrichment] Status: {status['enriched']:,}/{status['total_candles']:,} enriched ({status['percent_complete']}%)")
+        logger.info(
+            f"[Enrichment] Status: {status['enriched']:,}/{status['total_candles']:,} enriched ({status['percent_complete']}%)"
+        )
 
-        if status['pending'] > 0:
+        if status["pending"] > 0:
             logger.info(f"[Enrichment] Starting enrichment of {status['pending']:,} pending candles...")
             await run_enrichment()
         else:

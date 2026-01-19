@@ -23,8 +23,27 @@ import random
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from sqlalchemy import text, select, and_
+from sqlalchemy import and_, select, text
+
 from Infrastructure.Models.market_data_models import BacktestWindow
+
+
+def extend_pool(failures: list, seed: int | None = None) -> dict:
+    """
+    Extend pool to fix coverage gaps.
+
+    TODO: Implement this function to add windows for pairs below coverage targets.
+
+    Args:
+        failures: List of (symbol, timeframe) pairs below targets
+        seed: Random seed for reproducibility
+
+    Returns:
+        Dict with windows_added and pairs_fixed counts
+    """
+    # Stub implementation - logs warning and returns empty result
+    print(f"[WARNING] extend_pool not fully implemented, {len(failures)} failures unaddressed")
+    return {"windows_added": 0, "pairs_fixed": 0}
 
 
 @dataclass(frozen=True)
@@ -156,8 +175,7 @@ async def refresh_data_ranges(conn_string: str = None) -> dict[tuple[str, str], 
         _DATA_RANGES = {
             (row.symbol, row.timeframe): (row.start_ts, row.end_ts)
             for row in rows
-            if row.start_ts is not None and row.end_ts is not None
-            and row.timeframe != "6h"  # Skip 6h - sparse data
+            if row.start_ts is not None and row.end_ts is not None and row.timeframe != "6h"  # Skip 6h - sparse data
         }
         _LAST_REFRESH = datetime.now()
         return _DATA_RANGES
@@ -371,8 +389,8 @@ def get_pool_stats() -> dict:
     if not _POOL:
         return {"initialized": False, "pool_size": 0}
 
-    symbols = set(w.symbol for w in _POOL)
-    timeframes = set(w.timeframe for w in _POOL)
+    symbols = {w.symbol for w in _POOL}
+    timeframes = {w.timeframe for w in _POOL}
 
     # Count by timeframe
     tf_counts = {}
@@ -484,45 +502,44 @@ def verify_coverage(sample_points: int = 500) -> dict:
 async def _load_pool_from_db(conn_string: str = None, seed: int = 42, max_data_ts: int | None = None) -> bool:
     """
     Load cached window pool from database if valid.
-    
+
     Returns True if successfully loaded, False if cache miss or invalid.
     Cache is invalidated if seed or data timestamp changed.
     """
     global _POOL
-    
+
     try:
         # Import here to avoid circular deps
         from Database import async_session_maker
-        
+
         async with async_session_maker() as session:
             # Check if we have any cached windows
             result = await session.execute(
-                select(BacktestWindow).where(
+                select(BacktestWindow)
+                .where(
                     and_(
                         BacktestWindow.pool_seed == seed,
-                        BacktestWindow.data_max_ts == max_data_ts  # Invalidate if data changed
+                        BacktestWindow.data_max_ts == max_data_ts,  # Invalidate if data changed
                     )
-                ).limit(1)
+                )
+                .limit(1)
             )
             row = result.first()
-            
+
             if not row:
                 return False  # Cache miss
-            
+
             # Load all windows
             result = await session.execute(
                 select(BacktestWindow).where(
-                    and_(
-                        BacktestWindow.pool_seed == seed,
-                        BacktestWindow.data_max_ts == max_data_ts
-                    )
+                    and_(BacktestWindow.pool_seed == seed, BacktestWindow.data_max_ts == max_data_ts)
                 )
             )
             rows = result.fetchall()
-            
+
             if not rows:
                 return False
-            
+
             _POOL = [
                 Window(
                     symbol=row[0].symbol,
@@ -532,10 +549,10 @@ async def _load_pool_from_db(conn_string: str = None, seed: int = 42, max_data_t
                 )
                 for row in rows
             ]
-            
+
             print(f"[Cache Hit] Loaded {len(_POOL)} windows from database")
             return True
-            
+
     except Exception as e:
         print(f"[Cache] Failed to load from DB: {e}")
         return False
@@ -544,21 +561,21 @@ async def _load_pool_from_db(conn_string: str = None, seed: int = 42, max_data_t
 async def _save_pool_to_db(conn_string: str = None, seed: int = 42, max_data_ts: int | None = None):
     """Save computed window pool to database for future launches."""
     global _POOL
-    
+
     if not _POOL:
         return  # Nothing to save
-    
+
     try:
         from Database import async_session_maker
-        
+
         async with async_session_maker() as session:
             # Clear old cached windows with different seed/data_ts
             await session.execute(
                 text("DELETE FROM backtest_windows WHERE pool_seed != :seed OR data_max_ts != :data_ts"),
-                {"seed": seed, "data_ts": max_data_ts}
+                {"seed": seed, "data_ts": max_data_ts},
             )
             await session.commit()
-            
+
             # Insert new windows
             windows_to_save = [
                 BacktestWindow(
@@ -571,13 +588,13 @@ async def _save_pool_to_db(conn_string: str = None, seed: int = 42, max_data_ts:
                 )
                 for w in _POOL
             ]
-            
+
             for window in windows_to_save:
                 session.add(window)
-            
+
             await session.commit()
             print(f"[Cache Save] Persisted {len(_POOL)} windows to database")
-            
+
     except Exception as e:
         print(f"[Cache] Failed to save to DB: {e}")
 
@@ -586,14 +603,12 @@ async def _get_max_data_timestamp(conn_string: str = None) -> int:
     """Get the maximum timestamp of data in the enhanced_candles table."""
     try:
         from Database import async_session_maker
-        
+
         async with async_session_maker() as session:
-            result = await session.execute(
-                text("SELECT EXTRACT(EPOCH FROM MAX(time)) * 1000 FROM enhanced_candles")
-            )
+            result = await session.execute(text("SELECT EXTRACT(EPOCH FROM MAX(time)) * 1000 FROM enhanced_candles"))
             max_ts = result.scalar()
             return int(max_ts) if max_ts else 0
-            
+
     except Exception:
         return 0
 
@@ -601,10 +616,10 @@ async def _get_max_data_timestamp(conn_string: str = None) -> int:
 async def initialize(conn_string: str = None, seed: int = 42):
     """
     Initialize the window pool (call at startup).
-    
+
     Uses cached windows from database if available, otherwise generates and caches them.
     Cache is validated against current data timestamp to detect stale data.
-    
+
     On cache hit, automatically extends pool if coverage verification fails.
 
     Args:
@@ -612,16 +627,16 @@ async def initialize(conn_string: str = None, seed: int = 42):
         seed: Random seed for reproducibility
     """
     print("[Startup] Initializing backtest window pool...")
-    
+
     # Get current max data timestamp
     max_data_ts = await _get_max_data_timestamp(conn_string)
-    
+
     # Try to load from cache first
     if await _load_pool_from_db(conn_string, seed=seed, max_data_ts=max_data_ts):
         # Cache hit - verify coverage
         verification = verify_coverage(sample_points=200)
         stats = get_pool_stats()
-        
+
         if verification.get("priority_ok"):
             # Coverage is good - all done
             print(
@@ -633,34 +648,34 @@ async def initialize(conn_string: str = None, seed: int = 42):
             failures = verification.get("failures", [])
             if not failures:
                 # No actual failures - likely _DATA_RANGES not loaded yet, skip extension
-                print(f"  Coverage check skipped (no data ranges loaded), using cached pool")
+                print("  Coverage check skipped (no data ranges loaded), using cached pool")
                 return
 
             print(f"  Coverage WARNING: {len(failures)} pairs below targets")
-            print(f"  Auto-extending pool to fix coverage gaps...")
+            print("  Auto-extending pool to fix coverage gaps...")
 
             # Load data ranges and extend
             await refresh_data_ranges(conn_string)
             result = extend_pool(failures, seed=seed)
-            
+
             print(f"  Extended pool: +{result['windows_added']} windows, {result['pairs_fixed']} pairs fixed")
             print(
                 f"Coverage verification: OK ({verification['pairs_meeting_depth']}/{verification['pairs_checked']} pairs meet depth targets)"
             )
-            
+
             # Save updated pool
             await _save_pool_to_db(conn_string, seed=seed, max_data_ts=max_data_ts)
             return
-    
+
     print("  [Cache Miss] Generating pool from data ranges...")
     print("  Connecting to DB...")
     print("  Running data range query...")
     print("  Fetching results...")
-    
+
     # Cache miss - do full initialization
     await refresh_data_ranges(conn_string)
     generate_pool(seed=seed)
-    
+
     # Save to cache for next launch
     await _save_pool_to_db(conn_string, seed=seed, max_data_ts=max_data_ts)
 

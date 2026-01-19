@@ -22,6 +22,7 @@ This prevents:
 """
 
 import asyncio
+import contextlib
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
@@ -31,6 +32,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 class PipelinePhase(Enum):
     """Current phase of the backtest pipeline."""
+
     IDLE = "idle"
     LOADING_WINDOWS = "loading_windows"
     TESTING_PATTERNS = "testing_patterns"
@@ -43,6 +45,7 @@ class PipelinePhase(Enum):
 @dataclass
 class PipelineState:
     """Current state of the orchestrator pipeline."""
+
     phase: PipelinePhase = PipelinePhase.IDLE
     started_at: datetime | None = None
 
@@ -147,10 +150,8 @@ class BacktestOrchestrator:
 
         if self._task:
             self._task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._task
-            except asyncio.CancelledError:
-                pass
 
         self.state.phase = PipelinePhase.IDLE
         print("[Orchestrator] Stopped")
@@ -196,7 +197,9 @@ class BacktestOrchestrator:
                     self.state.last_cycle_at = datetime.utcnow()
                     self.state.consecutive_errors = 0
 
-                    print(f"[Orchestrator] Cycle {self.state.cycles_completed} complete ({windows_tested} windows tested)")
+                    print(
+                        f"[Orchestrator] Cycle {self.state.cycles_completed} complete ({windows_tested} windows tested)"
+                    )
 
                     # Cooldown before next cycle
                     await self._phase_cooldown()
@@ -325,10 +328,12 @@ class BacktestOrchestrator:
 
                     return {"status": "ok", "trades": trades}
 
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     self.state.patterns_skipped_timeout += 1
                     self.state.last_progress_at = datetime.utcnow()  # Timeout is still progress
-                    print(f"[Orchestrator] TIMEOUT: Pattern {pattern.pattern_id[:8]} exceeded {self.PATTERN_TIMEOUT_SECONDS}s")
+                    print(
+                        f"[Orchestrator] TIMEOUT: Pattern {pattern.pattern_id[:8]} exceeded {self.PATTERN_TIMEOUT_SECONDS}s"
+                    )
                     return {"status": "timeout"}
                 except Exception as e:
                     self.state.last_progress_at = datetime.utcnow()  # Error is still progress
@@ -364,10 +369,8 @@ class BacktestOrchestrator:
             results = await asyncio.gather(*[test_one_pattern(p, i) for i, p in enumerate(patterns)])
         finally:
             watchdog_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await watchdog_task
-            except asyncio.CancelledError:
-                pass
 
         await session.commit()
 

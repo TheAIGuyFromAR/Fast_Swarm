@@ -502,8 +502,7 @@ class PortfolioAgent:
         self._command_history[command.command_id] = command
         await self._pending_commands.put(command)
         logger.info(
-            "[%s] Command queued: %s %s %.4f",
-            self.exchange, command.side.value, command.symbol, command.size_pct
+            "[%s] Command queued: %s %s %.4f", self.exchange, command.side.value, command.symbol, command.size_pct
         )
         return command.command_id
 
@@ -513,10 +512,7 @@ class PortfolioAgent:
             try:
                 # Wait for command with timeout
                 try:
-                    command = await asyncio.wait_for(
-                        self._pending_commands.get(),
-                        timeout=1.0
-                    )
+                    command = await asyncio.wait_for(self._pending_commands.get(), timeout=1.0)
                 except TimeoutError:
                     continue
 
@@ -714,10 +710,7 @@ class PortfolioAgent:
 
         # Clean old entries
         cutoff = now.timestamp() - 60
-        self._orders_this_minute = [
-            t for t in self._orders_this_minute
-            if t.timestamp() > cutoff
-        ]
+        self._orders_this_minute = [t for t in self._orders_this_minute if t.timestamp() > cutoff]
 
         return len(self._orders_this_minute) < self.risk_limits.max_orders_per_minute
 
@@ -799,17 +792,22 @@ class PortfolioAgent:
 
                         if position.side == PositionSide.LONG:
                             position.unrealized_pnl = (price - position.entry_price) * position.size
-                            position.unrealized_pnl_pct = (price - position.entry_price) / position.entry_price * 100 if position.entry_price > 0 else 0
+                            position.unrealized_pnl_pct = (
+                                (price - position.entry_price) / position.entry_price * 100
+                                if position.entry_price > 0
+                                else 0
+                            )
                         elif position.side == PositionSide.SHORT:
                             position.unrealized_pnl = (position.entry_price - price) * position.size
-                            position.unrealized_pnl_pct = (position.entry_price - price) / position.entry_price * 100 if position.entry_price > 0 else 0
+                            position.unrealized_pnl_pct = (
+                                (position.entry_price - price) / position.entry_price * 100
+                                if position.entry_price > 0
+                                else 0
+                            )
 
                         # Track max drawdown
                         if position.unrealized_pnl_pct < 0:
-                            position.max_drawdown_pct = min(
-                                position.max_drawdown_pct,
-                                position.unrealized_pnl_pct
-                            )
+                            position.max_drawdown_pct = min(position.max_drawdown_pct, position.unrealized_pnl_pct)
 
                         position.updated_at = datetime.now(UTC)
 
@@ -850,12 +848,14 @@ class PortfolioAgent:
 
     def _has_exit_rules(self, command: TradeCommand) -> bool:
         """Check if command has any exit rules defined."""
-        return any([
-            command.stop_loss_pct is not None,
-            command.take_profit_pct is not None,
-            command.trailing_stop_pct is not None,
-            command.timeout_minutes is not None,
-        ])
+        return any(
+            [
+                command.stop_loss_pct is not None,
+                command.take_profit_pct is not None,
+                command.trailing_stop_pct is not None,
+                command.timeout_minutes is not None,
+            ]
+        )
 
     def _register_exit_rules(self, command: TradeCommand, entry_price: float):
         """
@@ -920,12 +920,12 @@ class PortfolioAgent:
         # Check stop loss
         if command.stop_loss_pct is not None:
             if pnl_pct <= -command.stop_loss_pct:
-                return f"stop_loss_triggered (loss: {pnl_pct*100:.2f}%)"
+                return f"stop_loss_triggered (loss: {pnl_pct * 100:.2f}%)"
 
         # Check take profit
         if command.take_profit_pct is not None:
             if pnl_pct >= command.take_profit_pct:
-                return f"take_profit_triggered (profit: {pnl_pct*100:.2f}%)"
+                return f"take_profit_triggered (profit: {pnl_pct * 100:.2f}%)"
 
         # Check trailing stop
         if command.trailing_stop_pct is not None:
@@ -940,7 +940,7 @@ class PortfolioAgent:
                 if high_water > 0:
                     drop_from_high = (high_water - current_price) / high_water
                     if drop_from_high >= command.trailing_stop_pct:
-                        return f"trailing_stop_triggered (drop: {drop_from_high*100:.2f}% from ${high_water:.2f})"
+                        return f"trailing_stop_triggered (drop: {drop_from_high * 100:.2f}% from ${high_water:.2f})"
 
             elif position.side == PositionSide.SHORT:
                 # Update low water mark
@@ -953,7 +953,7 @@ class PortfolioAgent:
                 if low_water > 0:
                     rise_from_low = (current_price - low_water) / low_water
                     if rise_from_low >= command.trailing_stop_pct:
-                        return f"trailing_stop_triggered (rise: {rise_from_low*100:.2f}% from ${low_water:.2f})"
+                        return f"trailing_stop_triggered (rise: {rise_from_low * 100:.2f}% from ${low_water:.2f})"
 
         # Check timeout
         if command.timeout_minutes is not None:
@@ -981,10 +981,7 @@ class PortfolioAgent:
             logger.warning("[%s] Cannot close flat position %s", self.exchange, symbol)
             return
 
-        logger.info(
-            "[%s] Auto-exit triggered for %s: %s",
-            self.exchange, symbol, reason
-        )
+        logger.info("[%s] Auto-exit triggered for %s: %s", self.exchange, symbol, reason)
 
         # Create close command
         close_command = TradeCommand(
@@ -1007,15 +1004,9 @@ class PortfolioAgent:
         result = await self._execute_command(close_command)
 
         if result.status == OrderStatus.FILLED:
-            logger.info(
-                "[%s] Auto-exit completed for %s at $%.2f",
-                self.exchange, symbol, result.filled_price
-            )
+            logger.info("[%s] Auto-exit completed for %s at $%.2f", self.exchange, symbol, result.filled_price)
         else:
-            logger.error(
-                "[%s] Auto-exit failed for %s: %s",
-                self.exchange, symbol, result.error_message
-            )
+            logger.error("[%s] Auto-exit failed for %s: %s", self.exchange, symbol, result.error_message)
             # Re-register exit rules if close failed
             if original_command:
                 self._active_exit_rules[symbol] = original_command

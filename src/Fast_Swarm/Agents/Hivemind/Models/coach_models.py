@@ -27,18 +27,21 @@ from sqlmodel import Column, Field, SQLModel
 
 class RosterStatus(str, Enum):
     """Agent instance status within a coach's roster."""
-    ACTIVE = "active"    # Currently voting in trades
-    BENCH = "bench"      # On roster but not voting
+
+    ACTIVE = "active"  # Currently voting in trades
+    BENCH = "bench"  # On roster but not voting
 
 
 class CoachStatus(str, Enum):
     """Coach lifecycle status."""
+
     ACTIVE = "active"
-    DEAD = "dead"        # Hit 1200 ELO threshold
+    DEAD = "dead"  # Hit 1200 ELO threshold
 
 
 class TrioStatus(str, Enum):
     """Trio lifecycle status."""
+
     ACTIVE = "active"
     REGROUPING = "regrouping"  # ELO gap too large, needs rebalancing
     COMPLETED = "completed"
@@ -46,15 +49,17 @@ class TrioStatus(str, Enum):
 
 class TradeLegType(str, Enum):
     """Type of trade leg for granular scoring."""
-    ENTRY = "entry"      # Opening a new position
-    ADD = "add"          # Adding to existing position
-    TRIM = "trim"        # Reducing position
-    EXIT = "exit"        # Closing position entirely
-    FLIP = "flip"        # Reversing direction
+
+    ENTRY = "entry"  # Opening a new position
+    ADD = "add"  # Adding to existing position
+    TRIM = "trim"  # Reducing position
+    EXIT = "exit"  # Closing position entirely
+    FLIP = "flip"  # Reversing direction
 
 
 class VoteDirection(int, Enum):
     """Vote scale from Strong Sell to Strong Buy."""
+
     STRONG_SELL = -2
     SELL = -1
     HOLD = 0
@@ -110,6 +115,7 @@ class AgentTemplate(SQLModel, table=True):
 
     Templates are never pruned - bad ones just don't get selected.
     """
+
     __tablename__ = "agent_templates"
 
     id: int | None = Field(default=None, primary_key=True)
@@ -157,6 +163,7 @@ class Coach(SQLModel, table=True):
     - Clone at 1800 ELO, die at 1200 ELO
     - Population maintained at 100 through auto-spawning
     """
+
     __tablename__ = "coaches"
 
     id: int | None = Field(default=None, primary_key=True)
@@ -243,6 +250,7 @@ class AgentInstance(SQLModel, table=True):
     - Clone at 1800 ELO (added to roster AND template catalog)
     - Die at 1200 ELO (removed from roster)
     """
+
     __tablename__ = "agent_instances"
 
     id: int | None = Field(default=None, primary_key=True)
@@ -311,6 +319,7 @@ class Trio(SQLModel, table=True):
     - Winners steal ELO from losers (coopetition)
     - Regrouped when ELO gap exceeds threshold (300)
     """
+
     __tablename__ = "trios"
 
     id: int | None = Field(default=None, primary_key=True)
@@ -355,6 +364,7 @@ class TradeLeg(SQLModel, table=True):
     - Add/Trim legs get 1x ELO weight
     - P&L uses sqrt scaling for diminishing returns
     """
+
     __tablename__ = "trade_legs"
 
     id: int | None = Field(default=None, primary_key=True)
@@ -398,6 +408,7 @@ class HivemindVote(SQLModel, table=True):
     Vote scale: -2 (Strong Sell) to +2 (Strong Buy)
     Weighted by: ELO × Confidence × Coach Kelly%
     """
+
     __tablename__ = "hivemind_votes"
 
     id: int | None = Field(default=None, primary_key=True)
@@ -443,6 +454,7 @@ class ELOTransfer(SQLModel, table=True):
     - Clone bonuses
     - Death penalties
     """
+
     __tablename__ = "elo_transfers"
 
     id: int | None = Field(default=None, primary_key=True)
@@ -475,6 +487,7 @@ class ELOTransfer(SQLModel, table=True):
 
 class CoachSummary(SQLModel):
     """Summary view of a coach for API responses."""
+
     coach_id: str
     name: str
     elo_rating: float
@@ -487,6 +500,7 @@ class CoachSummary(SQLModel):
 
 class TrioSummary(SQLModel):
     """Summary view of a trio for API responses."""
+
     trio_id: str
     coach_ids: list[str]
     elo_spread: float
@@ -496,6 +510,7 @@ class TrioSummary(SQLModel):
 
 class HivemindStatus(SQLModel):
     """Full status of a coach's hivemind."""
+
     coach: CoachSummary
     active_roster: list[dict]
     bench: list[dict]

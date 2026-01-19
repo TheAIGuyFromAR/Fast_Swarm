@@ -43,16 +43,18 @@ get_pool_stats = windows_module.get_pool_stats
 
 # Load template
 from jinja2 import select_autoescape
+
 PROMPTS_DIR = Path(__file__).parent.parent / "local_agents" / "prompts"
 env = Environment(loader=FileSystemLoader(str(PROMPTS_DIR)), autoescape=select_autoescape())
 AI_TEMPLATE = env.get_template("ai_zone_decision.j2")
 
 # vLLM runs in WSL - use WSL IP (get dynamically or use localhost if WSL2 mirrored networking)
 import subprocess as _sp
+
 try:
     _wsl_ip = _sp.check_output(["wsl", "hostname", "-I"], text=True).strip().split()[0]
     VLLM_URL = f"http://{_wsl_ip}:8000"
-except:
+except Exception:
     VLLM_URL = "http://localhost:8000"
 MFE_THRESHOLD = 1.5  # MFE > 1.5% = winner
 
@@ -74,7 +76,7 @@ def ensure_vllm_running():
         if resp.status_code == 200:
             print("vLLM already running")
             return True
-    except:
+    except Exception:
         pass
 
     print("Starting vLLM server in WSL...")
@@ -91,11 +93,11 @@ def ensure_vllm_running():
         try:
             resp = httpx.get(f"{VLLM_URL}/health", timeout=2.0)
             if resp.status_code == 200:
-                print(f"  vLLM ready after {i+1}s")
+                print(f"  vLLM ready after {i + 1}s")
                 return True
-        except:
+        except Exception:
             if i % 10 == 9:
-                print(f"  Waiting... ({i+1}s)")
+                print(f"  Waiting... ({i + 1}s)")
 
     print("  WARNING: vLLM failed to start after 60s")
     return False
@@ -228,7 +230,7 @@ def get_candles_for_window(conn, window):
 
     results = []
     for row in cur.fetchall():
-        d = dict(zip(columns, row))
+        d = dict(zip(columns, row, strict=False))
         d["symbol"] = window.symbol
         d["timeframe"] = window.timeframe
         results.append(d)
@@ -363,8 +365,28 @@ def run_collection(candles_per_symbol=50, agents_per_regime=20):
     ensure_training_table(conn)
 
     # Known symbols with 1h data (skip slow DISTINCT query)
-    symbols = ['BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'ADA', 'DOGE', 'AVAX', 'DOT', 'MATIC',
-               'LINK', 'UNI', 'ATOM', 'LTC', 'ETC', 'XLM', 'ALGO', 'NEAR', 'FTM', 'AAVE']
+    symbols = [
+        "BTC",
+        "ETH",
+        "SOL",
+        "BNB",
+        "XRP",
+        "ADA",
+        "DOGE",
+        "AVAX",
+        "DOT",
+        "MATIC",
+        "LINK",
+        "UNI",
+        "ATOM",
+        "LTC",
+        "ETC",
+        "XLM",
+        "ALGO",
+        "NEAR",
+        "FTM",
+        "AAVE",
+    ]
     print(f"Using {len(symbols)} known symbols")
     cur = conn.cursor()
 
@@ -408,7 +430,7 @@ def run_collection(candles_per_symbol=50, agents_per_regime=20):
         columns = ["time", "close", "rsi_14", "stoch_k", "adx_14", "macd_line", "macd_signal", "supertrend_direction"]
         candles = []
         for row in cur.fetchall():
-            d = dict(zip(columns, row))
+            d = dict(zip(columns, row, strict=False))
             d["symbol"] = symbol
             d["timeframe"] = "1h"
             candles.append(d)

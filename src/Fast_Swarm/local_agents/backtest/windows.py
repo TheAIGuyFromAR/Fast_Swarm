@@ -28,6 +28,24 @@ from sqlalchemy import and_, select, text
 from Fast_Swarm.Infrastructure.Models.market_data_models import BacktestWindow
 
 
+def extend_pool(failures: list, seed: int | None = None) -> dict:
+    """
+    Extend pool to fix coverage gaps.
+
+    TODO: Implement this function to add windows for pairs below coverage targets.
+
+    Args:
+        failures: List of (symbol, timeframe) pairs below targets
+        seed: Random seed for reproducibility
+
+    Returns:
+        Dict with windows_added and pairs_fixed counts
+    """
+    # Stub implementation - logs warning and returns empty result
+    print(f"[WARNING] extend_pool not fully implemented, {len(failures)} failures unaddressed")
+    return {"windows_added": 0, "pairs_fixed": 0}
+
+
 @dataclass(frozen=True)
 class Window:
     """Immutable backtest window specification."""
@@ -157,8 +175,7 @@ async def refresh_data_ranges(conn_string: str = None) -> dict[tuple[str, str], 
         _DATA_RANGES = {
             (row.symbol, row.timeframe): (row.start_ts, row.end_ts)
             for row in rows
-            if row.start_ts is not None and row.end_ts is not None
-            and row.timeframe != "6h"  # Skip 6h - sparse data
+            if row.start_ts is not None and row.end_ts is not None and row.timeframe != "6h"  # Skip 6h - sparse data
         }
         _LAST_REFRESH = datetime.now()
         return _DATA_RANGES
@@ -376,8 +393,8 @@ def get_pool_stats() -> dict:
     if not _POOL:
         return {"initialized": False, "pool_size": 0}
 
-    symbols = set(w.symbol for w in _POOL)
-    timeframes = set(w.timeframe for w in _POOL)
+    symbols = {w.symbol for w in _POOL}
+    timeframes = {w.timeframe for w in _POOL}
 
     # Count by timeframe
     tf_counts = {}
@@ -489,7 +506,7 @@ def verify_coverage(sample_points: int = 500) -> dict:
 async def _load_pool_from_db(conn_string: str = None, seed: int = 42, max_data_ts: int | None = None) -> bool:
     """
     Load cached window pool from database if valid.
-    
+
     Returns True if successfully loaded, False if cache miss or invalid.
     Cache is invalidated if seed or data timestamp changed.
     """
@@ -502,12 +519,14 @@ async def _load_pool_from_db(conn_string: str = None, seed: int = 42, max_data_t
         async with async_session_maker() as session:
             # Check if we have any cached windows
             result = await session.execute(
-                select(BacktestWindow).where(
+                select(BacktestWindow)
+                .where(
                     and_(
                         BacktestWindow.pool_seed == seed,
-                        BacktestWindow.data_max_ts == max_data_ts  # Invalidate if data changed
+                        BacktestWindow.data_max_ts == max_data_ts,  # Invalidate if data changed
                     )
-                ).limit(1)
+                )
+                .limit(1)
             )
             row = result.first()
 
@@ -517,10 +536,7 @@ async def _load_pool_from_db(conn_string: str = None, seed: int = 42, max_data_t
             # Load all windows
             result = await session.execute(
                 select(BacktestWindow).where(
-                    and_(
-                        BacktestWindow.pool_seed == seed,
-                        BacktestWindow.data_max_ts == max_data_ts
-                    )
+                    and_(BacktestWindow.pool_seed == seed, BacktestWindow.data_max_ts == max_data_ts)
                 )
             )
             rows = result.fetchall()
@@ -560,7 +576,7 @@ async def _save_pool_to_db(conn_string: str = None, seed: int = 42, max_data_ts:
             # Clear old cached windows with different seed/data_ts
             await session.execute(
                 text("DELETE FROM backtest_windows WHERE pool_seed != :seed OR data_max_ts != :data_ts"),
-                {"seed": seed, "data_ts": max_data_ts}
+                {"seed": seed, "data_ts": max_data_ts},
             )
             await session.commit()
 
@@ -593,9 +609,7 @@ async def _get_max_data_timestamp(conn_string: str = None) -> int:
         from Fast_Swarm.Database import async_session_maker
 
         async with async_session_maker() as session:
-            result = await session.execute(
-                text("SELECT EXTRACT(EPOCH FROM MAX(time)) * 1000 FROM enhanced_candles")
-            )
+            result = await session.execute(text("SELECT EXTRACT(EPOCH FROM MAX(time)) * 1000 FROM enhanced_candles"))
             max_ts = result.scalar()
             return int(max_ts) if max_ts else 0
 
@@ -607,10 +621,10 @@ async def _get_max_data_timestamp(conn_string: str = None) -> int:
 async def initialize(conn_string: str = None, seed: int = 42):
     """
     Initialize the window pool (call at startup).
-    
+
     Uses cached windows from database if available, otherwise generates and caches them.
     Cache is validated against current data timestamp to detect stale data.
-    
+
     On cache hit, automatically extends pool if coverage verification fails.
 
     Args:

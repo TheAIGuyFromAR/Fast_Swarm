@@ -328,7 +328,7 @@ def test_single_pattern(pattern: dict, data_ranges: dict) -> dict:
                 )
                 metrics = calculate_metrics(trades)
                 fitness_matrix[regime][timeframe]["results"].append(metrics)
-            except:
+            except Exception:
                 continue
 
     # 2. Test random windows at each timeframe
@@ -355,7 +355,7 @@ def test_single_pattern(pattern: dict, data_ranges: dict) -> dict:
                 )
                 metrics = calculate_metrics(trades)
                 fitness_matrix[regime_key][timeframe]["results"].append(metrics)
-            except:
+            except Exception:
                 continue
 
     # 3. Aggregate results per regime x timeframe

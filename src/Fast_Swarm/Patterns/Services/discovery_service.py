@@ -66,6 +66,7 @@ class PatternDiscoveryService:
             }
 
         import time
+
         batch_start = time.time()
         print(f"[PatternBacktest] Testing {len(patterns)} patterns across 3 assets...")
 
@@ -145,7 +146,9 @@ class PatternDiscoveryService:
                         new_fitness=avg_fitness,
                     )
                     tested += 1
-                    print(f"fitness={avg_fitness:.1f}, trades={total_trades}, windows={len(all_results)} ({pattern_elapsed:.1f}s)")
+                    print(
+                        f"fitness={avg_fitness:.1f}, trades={total_trades}, windows={len(all_results)} ({pattern_elapsed:.1f}s)"
+                    )
                 else:
                     print(f"0 trades, 0 windows ({pattern_elapsed:.1f}s)")
                     results[pid] = {"total_trades": 0, "windows_tested": 0}
@@ -261,7 +264,7 @@ class PatternDiscoveryService:
             w = windows[0]
             window_summary = f"{w.get('asset', '?')}/{w.get('timeframe', '?')}"
             if len(windows) > 1:
-                window_summary += f" (+{len(windows)-1} more)"
+                window_summary += f" (+{len(windows) - 1} more)"
             print(f"[PatternTest] {pid[:8]}: testing on {window_summary}...")
 
         # Convert pattern model to dict format for backtest_pattern_on_windows
@@ -317,6 +320,7 @@ class PatternDiscoveryService:
             pattern.periods_tested = (pattern.periods_tested or 0) + len(all_results)
 
             from datetime import datetime
+
             pattern.last_backtest_at = datetime.utcnow()
 
             session.add(pattern)
@@ -342,8 +346,8 @@ class PatternDiscoveryService:
             candle_info = ""
             if windows:
                 w = windows[0]
-                asset = w.get('asset', '?')
-                tf = w.get('timeframe', '?')
+                asset = w.get("asset", "?")
+                tf = w.get("timeframe", "?")
                 window_info = f" | {asset}/{tf}"
 
                 # Check candle count if preloaded_candles available

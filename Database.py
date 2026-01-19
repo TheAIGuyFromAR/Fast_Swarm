@@ -8,7 +8,7 @@ if sys.platform == "win32":
 
 import os
 import threading
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
@@ -127,10 +127,8 @@ async def get_session() -> AsyncSession:
         yield session
     except GeneratorExit:
         # Request was cancelled - suppress cleanup errors
-        try:
+        with suppress(Exception):
             await session.rollback()
-        except Exception:
-            pass
         raise
     finally:
         try:

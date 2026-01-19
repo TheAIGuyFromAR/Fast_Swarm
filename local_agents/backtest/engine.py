@@ -20,10 +20,16 @@ Accumulation Mode (default ON for BTC/ETH/SOL):
 - Assumes patient capital with long time horizon
 """
 
+from __future__ import annotations
+
 import math
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 from Fast_Swarm.local_agents.backtest.data import OHLCVLoader
 from Fast_Swarm.local_agents.backtest.pattern_matcher import evaluate_conditions
@@ -150,7 +156,7 @@ def calculate_dynamic_trail(
 
 # Optional vLLM import (may not be installed)
 try:
-    from Fast_Swarm.local_agents.shared.vllm_client import VLLMAIZoneHandler, VLLMClient
+    from Fast_Swarm.local_agents.shared.vllm_client import VLLMAIZoneHandler, VLLMClient  # noqa: F401
 
     HAS_VLLM = True
 except ImportError:
@@ -260,7 +266,7 @@ class BacktestConfig:
     include_costs: bool = True
 
     @classmethod
-    def from_traits(cls, traits: AgentTraits) -> "BacktestConfig":
+    def from_traits(cls, traits: AgentTraits) -> BacktestConfig:
         """Create config from agent traits."""
         from Fast_Swarm.local_agents.core.traits import (
             calculate_max_hold_duration_ms,
@@ -347,7 +353,7 @@ class OpenTrade:
         self,
         current_price: float,
         trail_pct: float,
-        config: "BacktestConfig",
+        config: BacktestConfig,
     ) -> bool:
         """
         Update trailing stop based on current price and exit strategy.
@@ -427,7 +433,7 @@ class LocalBacktestEngine:
         patterns: dict[str, dict] | None = None,
         ai_zone_mode: AIZoneMode = AIZoneMode.HEURISTIC,
         ai_zone_handler: AIZoneHandler | None = None,
-        preloaded_candles: dict[str, "pd.DataFrame"] | None = None,
+        preloaded_candles: dict[str, pd.DataFrame] | None = None,
         use_fast_inference: bool = True,
     ):
         """

@@ -20,7 +20,6 @@ from Fast_Swarm.logging_config_postgres import LogContext, ctx, get_logger
 
 from .base_ws import (
     BaseWebSocketClient,
-    BookTickerData,
     KlineData,
     MarkPriceData,
     NormalizedOrderBook,
@@ -527,9 +526,11 @@ class CryptoComWebSocket(BaseWebSocketClient):
     def get_status(self) -> dict[str, Any]:
         """Get extended client status."""
         status = super().get_status()
-        status.update({
-            "order_books_cached": len(self._order_books),
-            "request_id": self._request_id,
-            "connected_duration_sec": time.time() - self._connected_at if self._connected_at else 0,
-        })
+        status.update(
+            {
+                "order_books_cached": len(self._order_books),
+                "request_id": self._request_id,
+                "connected_duration_sec": time.time() - self._connected_at if self._connected_at else 0,
+            }
+        )
         return status

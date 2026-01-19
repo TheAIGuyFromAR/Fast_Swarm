@@ -5,8 +5,6 @@ Source of truth: Master_plan.md (Evolution Cycle)
 4-Phase cycle: SPAWN → BACKTEST → SELECT → REPRODUCE
 """
 
-import pytest
-
 from Fast_Swarm.Agents.Services.evolution_service import (
     AgentEvolutionService,
     _extract_patterns_from_agent,
@@ -27,6 +25,7 @@ def make_mock_agent(
     parent_a_id: str | None = None,
 ) -> object:
     """Create a mock agent object for testing."""
+
     class MockAgent:
         pass
 
