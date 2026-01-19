@@ -140,7 +140,7 @@ def main():
                             agent_tf_results[agent.agent_id][timeframe].append((fitness, len(trades), win_idx, weight))
                             stats["agents_scored_by_tf"][timeframe].add(agent.agent_id)
                             scored += 1
-                except:
+                except Exception:
                     pass
 
             stats["total_trades"] += window_trades

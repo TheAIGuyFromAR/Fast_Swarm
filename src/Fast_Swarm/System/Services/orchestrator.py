@@ -22,6 +22,7 @@ This prevents:
 """
 
 import asyncio
+import contextlib
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
@@ -147,10 +148,8 @@ class BacktestOrchestrator:
 
         if self._task:
             self._task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._task
-            except asyncio.CancelledError:
-                pass
 
         self.state.phase = PipelinePhase.IDLE
         print("[Orchestrator] Stopped")
@@ -364,10 +363,8 @@ class BacktestOrchestrator:
             results = await asyncio.gather(*[test_one_pattern(p, i) for i, p in enumerate(patterns)])
         finally:
             watchdog_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await watchdog_task
-            except asyncio.CancelledError:
-                pass
 
         await session.commit()
 

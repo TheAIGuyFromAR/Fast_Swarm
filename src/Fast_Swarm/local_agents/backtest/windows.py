@@ -394,8 +394,8 @@ def get_pool_stats() -> dict:
     if not _POOL:
         return {"initialized": False, "pool_size": 0}
 
-    symbols = set(w.symbol for w in _POOL)
-    timeframes = set(w.timeframe for w in _POOL)
+    symbols = {w.symbol for w in _POOL}
+    timeframes = {w.timeframe for w in _POOL}
 
     # Count by timeframe
     tf_counts = {}
@@ -507,7 +507,7 @@ def verify_coverage(sample_points: int = 500) -> dict:
 async def _load_pool_from_db(conn_string: str = None, seed: int = 42, max_data_ts: int | None = None) -> bool:
     """
     Load cached window pool from database if valid.
-    
+
     Returns True if successfully loaded, False if cache miss or invalid.
     Cache is invalidated if seed or data timestamp changed.
     """
@@ -625,10 +625,10 @@ async def _get_max_data_timestamp(conn_string: str = None) -> int:
 async def initialize(conn_string: str = None, seed: int = 42):
     """
     Initialize the window pool (call at startup).
-    
+
     Uses cached windows from database if available, otherwise generates and caches them.
     Cache is validated against current data timestamp to detect stale data.
-    
+
     On cache hit, automatically extends pool if coverage verification fails.
 
     Args:

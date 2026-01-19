@@ -177,7 +177,7 @@ class OrderBookSnapshot(SQLModel, table=True):
 class BacktestWindow(SQLModel, table=True):
     """
     Pre-computed backtest windows cached for fast startup.
-    
+
     Cached from windows.py generate_pool() to avoid recomputation on every launch.
     Invalidated when data ranges change (checked against max data timestamp).
     """

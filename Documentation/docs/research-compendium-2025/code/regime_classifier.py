@@ -244,7 +244,7 @@ class HMMRegimeClassifier:
 
         # Try to import hmmlearn
         try:
-            from hmmlearn import GaussianHMM
+            from hmmlearn import GaussianHMM  # noqa: F401
 
             self._hmm_available = True
         except ImportError:

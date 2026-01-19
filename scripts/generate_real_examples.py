@@ -72,7 +72,7 @@ def get_candle_with_all_indicators(conn, symbol, timeframe, candle_time):
 
     # Get column names
     col_names = [desc[0] for desc in cur.description]
-    return dict(zip(col_names, row))
+    return dict(zip(col_names, row, strict=False))
 
 
 def get_forward_mfe_with_exit(conn, symbol, timeframe, entry_time, bars=24):
@@ -221,8 +221,8 @@ def find_indicator_correlations(entries, threshold=0.3):
 
         if len(values) >= 10:
             # Simple correlation: mean value for high MFE vs low MFE
-            high_mfe = [v for v, m in zip(values, mfes) if m > 2.0]
-            low_mfe = [v for v, m in zip(values, mfes) if m < 1.0]
+            high_mfe = [v for v, m in zip(values, mfes, strict=False) if m > 2.0]
+            low_mfe = [v for v, m in zip(values, mfes, strict=False) if m < 1.0]
 
             if high_mfe and low_mfe:
                 high_mean = statistics.mean(high_mfe)

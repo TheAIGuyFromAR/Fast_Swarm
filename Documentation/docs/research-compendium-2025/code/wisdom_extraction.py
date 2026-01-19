@@ -444,8 +444,8 @@ def matches_condition(context: dict, condition_struct: dict) -> bool:
     Returns:
         True if all conditions match
     """
-    for field, condition in condition_struct.items():
-        value = context.get(field)
+    for field_name, condition in condition_struct.items():
+        value = context.get(field_name)
         if value is None:
             continue
 

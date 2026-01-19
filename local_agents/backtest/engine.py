@@ -156,7 +156,7 @@ def calculate_dynamic_trail(
 
 # Optional vLLM import (may not be installed)
 try:
-    from Fast_Swarm.local_agents.shared.vllm_client import VLLMAIZoneHandler, VLLMClient
+    from Fast_Swarm.local_agents.shared.vllm_client import VLLMAIZoneHandler, VLLMClient  # noqa: F401
 
     HAS_VLLM = True
 except ImportError:

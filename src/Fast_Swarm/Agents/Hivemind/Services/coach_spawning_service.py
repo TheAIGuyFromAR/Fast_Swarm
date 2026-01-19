@@ -137,7 +137,7 @@ async def select_templates_weighted(
 
     # Weighted random selection without replacement
     selected = []
-    available = list(zip(templates, weights))
+    available = list(zip(templates, weights, strict=False))
 
     for _ in range(count):
         if not available:
