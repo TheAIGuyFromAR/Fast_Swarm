@@ -166,7 +166,7 @@ async def get_crucible_leaderboard(
             ORDER BY ce.overall_fitness DESC
             LIMIT :limit
         """),
-        {"limit": limit}
+        {"limit": limit},
     )
     rows = result.fetchall()
 
@@ -441,6 +441,7 @@ async def event_stream():
             console.log(data.type, data.data);
         };
     """
+
     async def generate():
         import math
 
@@ -485,7 +486,7 @@ async def event_stream():
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",  # Disable nginx buffering
-        }
+        },
     )
 
 
@@ -593,7 +594,4 @@ async def prometheus_metrics(session: AsyncSession = Depends(get_session)):
     metrics_lines.append("# TYPE backtest_trades_winning counter")
     metrics_lines.append(f"backtest_trades_winning {trade_row[1] if trade_row else 0}")
 
-    return Response(
-        content="\n".join(metrics_lines) + "\n",
-        media_type="text/plain; version=0.0.4; charset=utf-8"
-    )
+    return Response(content="\n".join(metrics_lines) + "\n", media_type="text/plain; version=0.0.4; charset=utf-8")

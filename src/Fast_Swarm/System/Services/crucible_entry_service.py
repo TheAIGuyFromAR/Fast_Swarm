@@ -41,9 +41,7 @@ class CrucibleEntryService:
         - 150-199 entries: level 25
         - 200+ entries: level 30 (max)
         """
-        count_result = await session.execute(
-            select(func.count()).select_from(CrucibleEntry)
-        )
+        count_result = await session.execute(select(func.count()).select_from(CrucibleEntry))
         total_entries = count_result.scalar() or 0
 
         if total_entries < 10:

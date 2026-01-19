@@ -454,11 +454,13 @@ class AgentEvolutionService:
 
             except Exception as e:
                 logger.error(f"Clone failed for {parent.agent_id}: {e}", exc_info=True)
-                failures.append({
-                    "parent_id": parent.agent_id,
-                    "error": str(e),
-                    "error_type": type(e).__name__,
-                })
+                failures.append(
+                    {
+                        "parent_id": parent.agent_id,
+                        "error": str(e),
+                        "error_type": type(e).__name__,
+                    }
+                )
 
         # Batch add all clones and updated parents
         for clone in clones_to_add:

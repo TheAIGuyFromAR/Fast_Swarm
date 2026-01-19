@@ -107,9 +107,7 @@ class RosterContext:
 
         bench_summary = []
         for agent in self.benched_agents:
-            bench_summary.append(
-                f"  - {agent.name} (ELO: {float(agent.elo_rating):.0f})"
-            )
+            bench_summary.append(f"  - {agent.name} (ELO: {float(agent.elo_rating):.0f})")
 
         template_summary = []
         for template in self.available_templates[:10]:  # Top 10
@@ -132,10 +130,10 @@ Generation: {self.coach.generation}
 {tier_status}
 
 COACH TRAITS:
-- Kelly Fraction: {self.coach.traits.get('kelly_fraction', 0.5):.2f} (higher = more aggressive sizing)
-- Action Threshold: {self.coach.traits.get('action_threshold', 0.5):.2f} (higher = requires more confidence)
-- Regime Sensitivity: {self.coach.traits.get('regime_sensitivity', 0.5):.2f} (higher = more reactive to regime)
-- Roster Size Preference: {self.coach.traits.get('roster_size_preference', 3):.0f}
+- Kelly Fraction: {self.coach.traits.get("kelly_fraction", 0.5):.2f} (higher = more aggressive sizing)
+- Action Threshold: {self.coach.traits.get("action_threshold", 0.5):.2f} (higher = requires more confidence)
+- Regime Sensitivity: {self.coach.traits.get("regime_sensitivity", 0.5):.2f} (higher = more reactive to regime)
+- Roster Size Preference: {self.coach.traits.get("roster_size_preference", 3):.0f}
 
 CURRENT ROSTER ({len(self.current_roster)} active):
 {chr(10).join(roster_summary) if roster_summary else "  (empty)"}
@@ -148,9 +146,9 @@ AVAILABLE TEMPLATES (top 10 by fitness):
 
 MARKET REGIME: {self.current_regime.upper()}
 Regime Indicators:
-- Trend strength: {self.regime_indicators.get('trend_strength', 0):.2f}
-- Volatility: {self.regime_indicators.get('volatility', 0):.2f}
-- Momentum: {self.regime_indicators.get('momentum', 0):.2f}
+- Trend strength: {self.regime_indicators.get("trend_strength", 0):.2f}
+- Volatility: {self.regime_indicators.get("volatility", 0):.2f}
+- Momentum: {self.regime_indicators.get("momentum", 0):.2f}
 
 RECENT PERFORMANCE:
 - Win Rate: {self.recent_win_rate:.1%}
@@ -239,8 +237,7 @@ async def promote_coach_to_live(
     session.add(coach)
     await session.commit()
 
-    logger.info("Coach %s PROMOTED to LIVE trading (ELO: %.0f)",
-                coach.name, float(coach.elo_rating))
+    logger.info("Coach %s PROMOTED to LIVE trading (ELO: %.0f)", coach.name, float(coach.elo_rating))
     return True
 
 
@@ -266,8 +263,7 @@ async def demote_coach_to_paper(
     session.add(coach)
     await session.commit()
 
-    logger.warning("Coach %s DEMOTED to PAPER trading (ELO: %.0f)",
-                   coach.name, float(coach.elo_rating))
+    logger.warning("Coach %s DEMOTED to PAPER trading (ELO: %.0f)", coach.name, float(coach.elo_rating))
     return True
 
 
@@ -465,9 +461,7 @@ async def activate_agent(
     """Move a benched agent to active roster."""
     # Check roster capacity
     active_result = await session.exec(
-        select(AgentInstance)
-        .where(AgentInstance.coach_id == coach.coach_id)
-        .where(AgentInstance.is_active == True)
+        select(AgentInstance).where(AgentInstance.coach_id == coach.coach_id).where(AgentInstance.is_active == True)
     )
     active_count = len(active_result.all())
 
@@ -543,9 +537,7 @@ async def acquire_agent_from_template(
 
     # Check roster capacity
     active_result = await session.exec(
-        select(AgentInstance)
-        .where(AgentInstance.coach_id == coach.coach_id)
-        .where(AgentInstance.is_active == True)
+        select(AgentInstance).where(AgentInstance.coach_id == coach.coach_id).where(AgentInstance.is_active == True)
     )
     active_agents = active_result.all()
     active_count = len(active_agents)
@@ -555,9 +547,7 @@ async def acquire_agent_from_template(
         return None
 
     # Get template
-    template_result = await session.exec(
-        select(AgentTemplate).where(AgentTemplate.template_id == template_id)
-    )
+    template_result = await session.exec(select(AgentTemplate).where(AgentTemplate.template_id == template_id))
     template = template_result.first()
 
     if not template:
@@ -649,8 +639,9 @@ async def release_agent(
 
     if new_template:
         await session.refresh(new_template)
-        logger.info("Coach %s released agent %s, created template %s",
-                    coach.name, agent.name, new_template.template_id[:8])
+        logger.info(
+            "Coach %s released agent %s, created template %s", coach.name, agent.name, new_template.template_id[:8]
+        )
     else:
         logger.info("Coach %s released agent %s (no new template)", coach.name, agent.name)
 
@@ -725,11 +716,7 @@ async def build_roster_context(
     benched_agents = list(benched_result.all())
 
     # Get available templates (top 50 by fitness)
-    template_result = await session.exec(
-        select(AgentTemplate)
-        .order_by(AgentTemplate.overall_fitness.desc())
-        .limit(50)
-    )
+    template_result = await session.exec(select(AgentTemplate).order_by(AgentTemplate.overall_fitness.desc()).limit(50))
     available_templates = list(template_result.all())
 
     # Calculate roster metrics

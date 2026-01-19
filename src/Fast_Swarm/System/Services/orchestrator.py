@@ -32,6 +32,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 class PipelinePhase(Enum):
     """Current phase of the backtest pipeline."""
+
     IDLE = "idle"
     LOADING_WINDOWS = "loading_windows"
     TESTING_PATTERNS = "testing_patterns"
@@ -44,6 +45,7 @@ class PipelinePhase(Enum):
 @dataclass
 class PipelineState:
     """Current state of the orchestrator pipeline."""
+
     phase: PipelinePhase = PipelinePhase.IDLE
     started_at: datetime | None = None
 
@@ -195,7 +197,9 @@ class BacktestOrchestrator:
                     self.state.last_cycle_at = datetime.utcnow()
                     self.state.consecutive_errors = 0
 
-                    print(f"[Orchestrator] Cycle {self.state.cycles_completed} complete ({windows_tested} windows tested)")
+                    print(
+                        f"[Orchestrator] Cycle {self.state.cycles_completed} complete ({windows_tested} windows tested)"
+                    )
 
                     # Cooldown before next cycle
                     await self._phase_cooldown()
@@ -327,7 +331,9 @@ class BacktestOrchestrator:
                 except TimeoutError:
                     self.state.patterns_skipped_timeout += 1
                     self.state.last_progress_at = datetime.utcnow()  # Timeout is still progress
-                    print(f"[Orchestrator] TIMEOUT: Pattern {pattern.pattern_id[:8]} exceeded {self.PATTERN_TIMEOUT_SECONDS}s")
+                    print(
+                        f"[Orchestrator] TIMEOUT: Pattern {pattern.pattern_id[:8]} exceeded {self.PATTERN_TIMEOUT_SECONDS}s"
+                    )
                     return {"status": "timeout"}
                 except Exception as e:
                     self.state.last_progress_at = datetime.utcnow()  # Error is still progress

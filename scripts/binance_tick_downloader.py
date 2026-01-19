@@ -258,9 +258,10 @@ def stream_import_trades(conn, zip_path: Path, our_symbol: str, chunk_size: int 
 
     # Insert remaining trades
     if chunk:
-        with conn.cursor() as cur, cur.copy(
-            "COPY exchange_ticks (time, symbol, price, size, side, trade_id, exchange) FROM STDIN"
-        ) as copy:
+        with (
+            conn.cursor() as cur,
+            cur.copy("COPY exchange_ticks (time, symbol, price, size, side, trade_id, exchange) FROM STDIN") as copy,
+        ):
             for t in chunk:
                 copy.write_row(t)
         conn.commit()

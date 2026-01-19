@@ -83,7 +83,7 @@ jobs:
           -c pyproject.toml \
           --severity-level high \
           --confidence-level high \
-          -f github
+          -f txt
 
     - name: Bandit security scan (warnings - medium severity)
       if: always()
@@ -93,4 +93,4 @@ jobs:
           -c pyproject.toml \
           --severity-level medium \
           --confidence-level medium \
-          -f github || true
+          -f txt || true

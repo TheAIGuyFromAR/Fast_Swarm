@@ -121,6 +121,7 @@ class AgentBacktestService:
         if agent_id:
             try:
                 from sqlalchemy import text
+
                 result = await session.execute(
                     text("""
                         SELECT symbol || '_' || timeframe || '_' ||
@@ -129,7 +130,7 @@ class AgentBacktestService:
                         WHERE agent_id = :agent_id
                         GROUP BY symbol, timeframe, entry_timestamp
                     """),
-                    {"agent_id": agent_id}
+                    {"agent_id": agent_id},
                 )
                 tested_window_keys = {row[0] for row in result.fetchall()}
             except Exception as e:
@@ -145,20 +146,24 @@ class AgentBacktestService:
             if window_key in tested_window_keys:
                 continue
 
-            windows.append({
-                "asset": w.symbol,
-                "timeframe": w.timeframe,
-                "start_ts": w.start_ts,
-                "end_ts": w.end_ts,
-                "regime": f"random_{w.timeframe}",
-            })
+            windows.append(
+                {
+                    "asset": w.symbol,
+                    "timeframe": w.timeframe,
+                    "start_ts": w.start_ts,
+                    "end_ts": w.end_ts,
+                    "regime": f"random_{w.timeframe}",
+                }
+            )
 
             if len(windows) >= count:
                 break
 
         stats = get_pool_stats()
         skipped = len(tested_window_keys) if tested_window_keys else 0
-        print(f"[Backtest] Selected {len(windows)} windows from pool of {stats['pool_size']} (skipped {skipped} already tested)")
+        print(
+            f"[Backtest] Selected {len(windows)} windows from pool of {stats['pool_size']} (skipped {skipped} already tested)"
+        )
 
         return windows
 
@@ -209,18 +214,22 @@ class AgentBacktestService:
                     continue
                 regime_counts[regime] = regime_counts.get(regime, 0) + 1
 
-                all_windows.append({
-                    "asset": period["asset"],
-                    "timeframe": period["timeframe"],
-                    "start_ts": period["start_ts"],
-                    "end_ts": period["end_ts"],
-                    "regime": regime,
-                    "period_name": period["name"],
-                    "description": period.get("description", ""),
-                })
+                all_windows.append(
+                    {
+                        "asset": period["asset"],
+                        "timeframe": period["timeframe"],
+                        "start_ts": period["start_ts"],
+                        "end_ts": period["end_ts"],
+                        "regime": regime,
+                        "period_name": period["name"],
+                        "description": period.get("description", ""),
+                    }
+                )
 
             canonical_added = sum(regime_counts.values())
-            print(f"[Backtest] Added {canonical_added} canonical periods (max {self.CANONICAL_WINDOWS_PER_REGIME}/regime)")
+            print(
+                f"[Backtest] Added {canonical_added} canonical periods (max {self.CANONICAL_WINDOWS_PER_REGIME}/regime)"
+            )
 
         # Summary
         regime_counts = {}
@@ -334,9 +343,7 @@ class AgentBacktestService:
 
                 # Hydrate reference IDs (only query what we need)
                 if reference_ids:
-                    pattern_result = await session.exec(
-                        select(Pattern).where(Pattern.pattern_id.in_(reference_ids))
-                    )
+                    pattern_result = await session.exec(select(Pattern).where(Pattern.pattern_id.in_(reference_ids)))
                     fetched_patterns = pattern_result.all()
 
                     for p in fetched_patterns:
@@ -828,9 +835,7 @@ class AgentBacktestService:
 
         # Second pass: hydrate reference IDs (only query what we need)
         if reference_ids:
-            pattern_result = await session.exec(
-                select(Pattern).where(Pattern.pattern_id.in_(reference_ids))
-            )
+            pattern_result = await session.exec(select(Pattern).where(Pattern.pattern_id.in_(reference_ids)))
             fetched_patterns = pattern_result.all()
 
             for p in fetched_patterns:
@@ -856,6 +861,7 @@ class AgentBacktestService:
         traits_dict = agent.traits if isinstance(agent.traits, dict) else agent.traits.__dict__
 
         from dataclasses import fields as dataclass_fields
+
         known_fields = {f.name for f in dataclass_fields(AgentTraits)}
         filtered_traits = {k: v for k, v in traits_dict.items() if k in known_fields}
 
@@ -905,16 +911,18 @@ class AgentBacktestService:
             regime = "random" if raw_regime.startswith("random_") else raw_regime
 
             w_metrics = self._calculate_metrics(window_trades)
-            window_metrics.append({
-                "regime": regime,
-                "timeframe": window_tf,
-                "trades": len(window_trades),
-                "fitness": w_metrics.get("fitness_score", 0.0),
-                "sortino": w_metrics.get("sortino_ratio"),
-                "win_rate": w_metrics.get("win_rate"),
-                "roi": w_metrics.get("annualized_roi_pct", 0.0),
-                "pnl": w_metrics.get("total_pnl", 0.0),
-            })
+            window_metrics.append(
+                {
+                    "regime": regime,
+                    "timeframe": window_tf,
+                    "trades": len(window_trades),
+                    "fitness": w_metrics.get("fitness_score", 0.0),
+                    "sortino": w_metrics.get("sortino_ratio"),
+                    "win_rate": w_metrics.get("win_rate"),
+                    "roi": w_metrics.get("annualized_roi_pct", 0.0),
+                    "pnl": w_metrics.get("total_pnl", 0.0),
+                }
+            )
 
         agent_elapsed = time.time() - agent_start
 
@@ -937,6 +945,7 @@ class AgentBacktestService:
         # Update agent in DB (agent is already tracked, no need to add)
         # Convert to proper types to avoid Decimal + float errors
         from decimal import Decimal
+
         agent.fitness_score = float(avg_fitness) if avg_fitness else 0.0
         agent.sortino_ratio = float(avg_sortino) if avg_sortino else None
         agent.win_rate = float(avg_win_rate) if avg_win_rate else None
@@ -966,7 +975,9 @@ class AgentBacktestService:
                     for t in all_trades
                 ]
                 # Use dominant regime from window metrics
-                dominant_regime = max(window_metrics, key=lambda w: w["trades"])["regime"] if window_metrics else "random"
+                dominant_regime = (
+                    max(window_metrics, key=lambda w: w["trades"])["regime"] if window_metrics else "random"
+                )
                 dominant_tf = max(window_metrics, key=lambda w: w["trades"])["timeframe"] if window_metrics else "1h"
 
                 # Use no_autoflush context to prevent session.add() during flush warnings
@@ -988,7 +999,9 @@ class AgentBacktestService:
             except Exception as e:
                 print(f"[AgentTest] Memory creation failed for {aid[:8]}: {e}")
 
-        print(f"[AgentTest] {aid[:8]}: fitness={avg_fitness:.1f}, trades={total_trades}, windows={len(windows)} ({agent_elapsed:.1f}s)")
+        print(
+            f"[AgentTest] {aid[:8]}: fitness={avg_fitness:.1f}, trades={total_trades}, windows={len(windows)} ({agent_elapsed:.1f}s)"
+        )
 
         return {
             "agent_id": aid,

@@ -250,14 +250,16 @@ class CryptoComRESTClient:
             if quantity == 0:
                 continue
 
-            positions.append({
-                "symbol": pos.get("instrument_name"),
-                "side": "long" if quantity > 0 else "short",
-                "size": abs(quantity),
-                "entry_price": float(pos.get("avg_price", 0)),
-                "unrealized_pnl": float(pos.get("open_position_pnl", 0)),
-                "cost": float(pos.get("cost", 0)),
-            })
+            positions.append(
+                {
+                    "symbol": pos.get("instrument_name"),
+                    "side": "long" if quantity > 0 else "short",
+                    "size": abs(quantity),
+                    "entry_price": float(pos.get("avg_price", 0)),
+                    "unrealized_pnl": float(pos.get("open_position_pnl", 0)),
+                    "cost": float(pos.get("cost", 0)),
+                }
+            )
 
         return positions
 
@@ -475,16 +477,18 @@ class CryptoComRESTClient:
 
         orders = []
         for order in result.get("data", []):
-            orders.append({
-                "order_id": order.get("order_id"),
-                "symbol": order.get("instrument_name"),
-                "side": order.get("side", "").lower(),
-                "type": order.get("type", "").lower(),
-                "size": float(order.get("quantity", 0)),
-                "price": float(order.get("price", 0)) if order.get("price") else None,
-                "filled_size": float(order.get("cumulative_quantity", 0)),
-                "status": order.get("status"),
-            })
+            orders.append(
+                {
+                    "order_id": order.get("order_id"),
+                    "symbol": order.get("instrument_name"),
+                    "side": order.get("side", "").lower(),
+                    "type": order.get("type", "").lower(),
+                    "size": float(order.get("quantity", 0)),
+                    "price": float(order.get("price", 0)) if order.get("price") else None,
+                    "filled_size": float(order.get("cumulative_quantity", 0)),
+                    "status": order.get("status"),
+                }
+            )
 
         return orders
 

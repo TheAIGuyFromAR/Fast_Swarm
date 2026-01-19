@@ -53,6 +53,7 @@ ADX_BUCKETS = [
     (60, 100, "extreme_trend"),
 ]
 
+
 def get_macd_bucket(macd_val):
     """
     MACD bucketing by sign only - works across all assets.
@@ -124,8 +125,8 @@ def generate_rich_response(record, cluster_stats):
             f"Stochastic at {stoch:.1f} ({bucket_value(stoch, STOCH_BUCKETS)}) indicates oversold conditions. "
             f"ADX at {adx:.1f} shows {bucket_value(adx, ADX_BUCKETS)} strength. "
             f"MACD is {macd_dir}. Supertrend is {supertrend}. "
-            f"In {sample_size} similar setups with RSI {rsi-3:.0f}-{rsi+3:.0f}, Stoch {stoch-5:.0f}-{stoch+5:.0f}, "
-            f"ADX {adx-3:.0f}-{adx+3:.0f}, MACD {macd_dir}, and {supertrend} trend, "
+            f"In {sample_size} similar setups with RSI {rsi - 3:.0f}-{rsi + 3:.0f}, Stoch {stoch - 5:.0f}-{stoch + 5:.0f}, "
+            f"ADX {adx - 3:.0f}-{adx + 3:.0f}, MACD {macd_dir}, and {supertrend} trend, "
             f"we observed an average MFE of {avg_mfe:.2f}% within {avg_bars:.1f} candles "
             f"with a {win_rate:.0f}% win rate. "
             f"Exit when RSI reaches {exit_rsi:.0f} and Stoch approaches {exit_stoch:.0f}."
@@ -137,8 +138,8 @@ def generate_rich_response(record, cluster_stats):
             f"Stochastic at {stoch:.1f} ({bucket_value(stoch, STOCH_BUCKETS)}) suggests potential upside. "
             f"ADX at {adx:.1f} indicates {bucket_value(adx, ADX_BUCKETS)}. "
             f"MACD is {macd_dir}. Supertrend direction: {supertrend}. "
-            f"Historical data from {sample_size} similar setups (RSI {rsi-3:.0f}-{rsi+3:.0f}, "
-            f"Stoch {stoch-5:.0f}-{stoch+5:.0f}, ADX {adx-3:.0f}-{adx+3:.0f}, MACD {macd_dir}) shows "
+            f"Historical data from {sample_size} similar setups (RSI {rsi - 3:.0f}-{rsi + 3:.0f}, "
+            f"Stoch {stoch - 5:.0f}-{stoch + 5:.0f}, ADX {adx - 3:.0f}-{adx + 3:.0f}, MACD {macd_dir}) shows "
             f"average MFE of {avg_mfe:.2f}% over {avg_bars:.1f} candles, {win_rate:.0f}% win rate. "
             f"Consider exit near RSI {exit_rsi:.0f}, Stoch {exit_stoch:.0f}."
         )
@@ -149,8 +150,8 @@ def generate_rich_response(record, cluster_stats):
             f"Stoch at {stoch:.1f} is {bucket_value(stoch, STOCH_BUCKETS)}. "
             f"ADX of {adx:.1f} shows {bucket_value(adx, ADX_BUCKETS)}. "
             f"MACD is {macd_dir}. Supertrend: {supertrend}. "
-            f"Analysis of {sample_size} similar patterns (RSI {rsi-3:.0f}-{rsi+3:.0f}, Stoch {stoch-5:.0f}-{stoch+5:.0f}, "
-            f"ADX {adx-3:.0f}-{adx+3:.0f}, MACD {macd_dir}, {supertrend} trend) reveals "
+            f"Analysis of {sample_size} similar patterns (RSI {rsi - 3:.0f}-{rsi + 3:.0f}, Stoch {stoch - 5:.0f}-{stoch + 5:.0f}, "
+            f"ADX {adx - 3:.0f}-{adx + 3:.0f}, MACD {macd_dir}, {supertrend} trend) reveals "
             f"average MFE of only {avg_mfe:.2f}% in {avg_bars:.1f} candles with {win_rate:.0f}% success. "
             f"Insufficient edge for entry."
         )
@@ -160,8 +161,8 @@ def generate_rich_response(record, cluster_stats):
             f"RSI {rsi:.1f} ({bucket_value(rsi, RSI_BUCKETS)}), Stoch {stoch:.1f} ({bucket_value(stoch, STOCH_BUCKETS)}) "
             f"lack oversold conditions. ADX at {adx:.1f} indicates {bucket_value(adx, ADX_BUCKETS)}. "
             f"MACD is {macd_dir}. Supertrend: {supertrend}. "
-            f"Historical analysis of {sample_size} matching setups (RSI {rsi-3:.0f}-{rsi+3:.0f}, "
-            f"Stoch {stoch-5:.0f}-{stoch+5:.0f}, ADX {adx-3:.0f}-{adx+3:.0f}, MACD {macd_dir}, "
+            f"Historical analysis of {sample_size} matching setups (RSI {rsi - 3:.0f}-{rsi + 3:.0f}, "
+            f"Stoch {stoch - 5:.0f}-{stoch + 5:.0f}, ADX {adx - 3:.0f}-{adx + 3:.0f}, MACD {macd_dir}, "
             f"{supertrend}) shows average MFE of {avg_mfe:.2f}% over {avg_bars:.1f} candles, "
             f"only {win_rate:.0f}% win rate. Risk/reward unfavorable."
         )
@@ -209,11 +210,13 @@ def main():
     for record in records:
         indicators = record.get("entry_indicators", {})
         cluster_key = get_cluster_key(indicators)
-        clusters[cluster_key].append({
-            "mfe": record.get("mfe", 0),
-            "bars": record.get("bars_to_mfe", 0),
-            "is_winner": record.get("is_winner", False),
-        })
+        clusters[cluster_key].append(
+            {
+                "mfe": record.get("mfe", 0),
+                "bars": record.get("bars_to_mfe", 0),
+                "is_winner": record.get("is_winner", False),
+            }
+        )
 
     # Calculate statistics per cluster
     cluster_stats = {}
@@ -235,8 +238,10 @@ def main():
     print("\nTop clusters by sample size:")
     sorted_clusters = sorted(cluster_stats.items(), key=lambda x: x[1]["count"], reverse=True)
     for key, stats in sorted_clusters[:10]:
-        print(f"  {describe_cluster(key)}: {stats['count']} samples, "
-              f"avg MFE {stats['avg_mfe']:.2f}%, win rate {stats['win_rate']:.0f}%")
+        print(
+            f"  {describe_cluster(key)}: {stats['count']} samples, "
+            f"avg MFE {stats['avg_mfe']:.2f}%, win rate {stats['win_rate']:.0f}%"
+        )
 
     # Enrich records with new perfect_response
     print("\nEnriching records...")
@@ -254,9 +259,9 @@ def main():
     print(f"\nDone! Enriched {len(enriched)} records")
 
     # Show sample
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("SAMPLE ENRICHED RESPONSE:")
-    print("="*60)
+    print("=" * 60)
     sample = enriched[0]
     print(f"Symbol: {sample['symbol']}")
     print(f"Correct choice: {sample['correct_choice']}")

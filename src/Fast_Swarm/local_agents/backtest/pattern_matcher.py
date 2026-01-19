@@ -482,8 +482,12 @@ def compute_derived_indicator(
         slow_col = f"{slow_type}_{slow_period}"
 
         # Try to resolve columns
-        fast_val = indicators.get(fast_col) or indicators.get(f"ema_{fast_period}") or indicators.get(f"sma_{fast_period}")
-        slow_val = indicators.get(slow_col) or indicators.get(f"ema_{slow_period}") or indicators.get(f"sma_{slow_period}")
+        fast_val = (
+            indicators.get(fast_col) or indicators.get(f"ema_{fast_period}") or indicators.get(f"sma_{fast_period}")
+        )
+        slow_val = (
+            indicators.get(slow_col) or indicators.get(f"ema_{slow_period}") or indicators.get(f"sma_{slow_period}")
+        )
 
         if fast_val is not None and slow_val is not None:
             # Return relative position: positive = fast above slow, negative = fast below

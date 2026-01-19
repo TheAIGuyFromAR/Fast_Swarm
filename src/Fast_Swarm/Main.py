@@ -39,6 +39,7 @@ if OTEL_ENABLED:
         if os.getenv("OTEL_EXPORTER") == "jaeger":
             try:
                 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+
                 exporter = OTLPSpanExporter(endpoint=os.getenv("OTEL_ENDPOINT", "localhost:4317"))
                 print("[OTel] Using OTLP/Jaeger exporter")
             except ImportError:
@@ -55,7 +56,9 @@ if OTEL_ENABLED:
         print("[OTel] Tracing enabled")
     except ImportError as e:
         print(f"[OTel] OpenTelemetry not installed: {e}")
-        print("[OTel] Install with: pip install opentelemetry-api opentelemetry-sdk opentelemetry-instrumentation-fastapi")
+        print(
+            "[OTel] Install with: pip install opentelemetry-api opentelemetry-sdk opentelemetry-instrumentation-fastapi"
+        )
         OTEL_ENABLED = False
         OTEL_TRACER = None
 else:

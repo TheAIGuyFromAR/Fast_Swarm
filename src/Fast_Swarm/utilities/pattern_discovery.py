@@ -265,8 +265,19 @@ class PatternDiscoveryScheduler:
         indicator_cols_set = set()
 
         for row in raw_trades:
-            (pnl_pct, symbol, timeframe, entry_indicators,
-             entry_price, exit_price, mfe_pct, mfe_price, mae_pct, mae_price, side) = row
+            (
+                pnl_pct,
+                symbol,
+                timeframe,
+                entry_indicators,
+                entry_price,
+                exit_price,
+                mfe_pct,
+                mfe_price,
+                mae_pct,
+                mae_price,
+                side,
+            ) = row
 
             if not entry_indicators or not isinstance(entry_indicators, dict):
                 continue
@@ -308,7 +319,7 @@ class PatternDiscoveryScheduler:
                 "symbol": symbol,
                 "timeframe": timeframe,
                 "trade_type": "chaos",
-                **indicators
+                **indicators,
             }
 
             # 2. BEST_EXIT - same entry, exit at MFE
@@ -319,7 +330,7 @@ class PatternDiscoveryScheduler:
                 "symbol": symbol,
                 "timeframe": timeframe,
                 "trade_type": "best_exit",
-                **indicators
+                **indicators,
             }
 
             # 3. WORST_EXIT - same entry, exit at MAE
@@ -329,7 +340,7 @@ class PatternDiscoveryScheduler:
                 "symbol": symbol,
                 "timeframe": timeframe,
                 "trade_type": "worst_exit",
-                **indicators
+                **indicators,
             }
 
             # 4. PERFECT - hypothetical better entry → MFE exit
@@ -347,7 +358,7 @@ class PatternDiscoveryScheduler:
                 "symbol": symbol,
                 "timeframe": timeframe,
                 "trade_type": "perfect",
-                **indicators
+                **indicators,
             }
 
             # Classify into winners/losers based on PnL threshold
@@ -359,7 +370,9 @@ class PatternDiscoveryScheduler:
                 # Trades between thresholds are ignored (neutral zone)
 
         indicator_cols = list(indicator_cols_set)[:30]
-        print(f"[PatternDiscovery] Generated {len(winners)} winners, {len(losers)} losers from {len(raw_trades)} base trades")
+        print(
+            f"[PatternDiscovery] Generated {len(winners)} winners, {len(losers)} losers from {len(raw_trades)} base trades"
+        )
         print("[PatternDiscovery] Trade types: chaos, best_exit, worst_exit, perfect")
         print(f"[PatternDiscovery] Extracted {len(indicator_cols)} indicator columns")
 

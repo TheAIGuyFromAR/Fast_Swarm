@@ -223,7 +223,9 @@ def compute_indicators(candles: list[dict]) -> dict[str, float]:
     # Volume SMA
     if len(volumes) >= 20:
         indicators["volume_sma_20"] = sum(volumes[-20:]) / 20
-        indicators["volume_ratio"] = volumes[-1] / indicators["volume_sma_20"] if indicators["volume_sma_20"] > 0 else 1.0
+        indicators["volume_ratio"] = (
+            volumes[-1] / indicators["volume_sma_20"] if indicators["volume_sma_20"] > 0 else 1.0
+        )
 
     # Price change
     if len(closes) >= 2:
@@ -264,7 +266,7 @@ def _rsi(closes: list[float], period: int = 14) -> float:
     losses = []
 
     for i in range(1, len(closes)):
-        change = closes[i] - closes[i-1]
+        change = closes[i] - closes[i - 1]
         if change > 0:
             gains.append(change)
             losses.append(0)
@@ -295,7 +297,7 @@ def _std(values: list[float]) -> float:
 
     mean = sum(values) / len(values)
     variance = sum((x - mean) ** 2 for x in values) / len(values)
-    return variance ** 0.5
+    return variance**0.5
 
 
 def _atr(candles: list[dict], period: int = 14) -> float:
@@ -307,13 +309,9 @@ def _atr(candles: list[dict], period: int = 14) -> float:
     for i in range(1, len(candles)):
         high = candles[i]["high"]
         low = candles[i]["low"]
-        prev_close = candles[i-1]["close"]
+        prev_close = candles[i - 1]["close"]
 
-        tr = max(
-            high - low,
-            abs(high - prev_close),
-            abs(low - prev_close)
-        )
+        tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
         true_ranges.append(tr)
 
     # Use recent period

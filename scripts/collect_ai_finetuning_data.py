@@ -93,11 +93,11 @@ def ensure_vllm_running():
         try:
             resp = httpx.get(f"{VLLM_URL}/health", timeout=2.0)
             if resp.status_code == 200:
-                print(f"  vLLM ready after {i+1}s")
+                print(f"  vLLM ready after {i + 1}s")
                 return True
         except Exception:
             if i % 10 == 9:
-                print(f"  Waiting... ({i+1}s)")
+                print(f"  Waiting... ({i + 1}s)")
 
     print("  WARNING: vLLM failed to start after 60s")
     return False
@@ -365,8 +365,28 @@ def run_collection(candles_per_symbol=50, agents_per_regime=20):
     ensure_training_table(conn)
 
     # Known symbols with 1h data (skip slow DISTINCT query)
-    symbols = ['BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'ADA', 'DOGE', 'AVAX', 'DOT', 'MATIC',
-               'LINK', 'UNI', 'ATOM', 'LTC', 'ETC', 'XLM', 'ALGO', 'NEAR', 'FTM', 'AAVE']
+    symbols = [
+        "BTC",
+        "ETH",
+        "SOL",
+        "BNB",
+        "XRP",
+        "ADA",
+        "DOGE",
+        "AVAX",
+        "DOT",
+        "MATIC",
+        "LINK",
+        "UNI",
+        "ATOM",
+        "LTC",
+        "ETC",
+        "XLM",
+        "ALGO",
+        "NEAR",
+        "FTM",
+        "AAVE",
+    ]
     print(f"Using {len(symbols)} known symbols")
     cur = conn.cursor()
 

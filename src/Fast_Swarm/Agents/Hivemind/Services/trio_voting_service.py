@@ -242,9 +242,7 @@ async def aggregate_hivemind_votes(
         HivemindDecision with aggregated vote
     """
     # Get coach for Kelly fraction and ELO
-    result = await session.exec(
-        select(Coach).where(Coach.coach_id == coach_id)
-    )
+    result = await session.exec(select(Coach).where(Coach.coach_id == coach_id))
     coach = result.first()
 
     if not coach:
@@ -531,9 +529,7 @@ async def close_trade_leg(
     Returns:
         Updated TradeLeg record
     """
-    result = await session.exec(
-        select(TradeLeg).where(TradeLeg.leg_id == leg_id)
-    )
+    result = await session.exec(select(TradeLeg).where(TradeLeg.leg_id == leg_id))
     leg = result.first()
 
     if not leg:

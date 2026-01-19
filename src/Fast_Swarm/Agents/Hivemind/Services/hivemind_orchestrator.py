@@ -543,10 +543,7 @@ class HivemindOrchestrator:
                 }
                 for name, client in self._ws_clients.items()
             },
-            "portfolio_agents": {
-                name: agent.get_status()
-                for name, agent in self._portfolio_agents.items()
-            },
+            "portfolio_agents": {name: agent.get_status() for name, agent in self._portfolio_agents.items()},
             "data_feed": self._data_feed.get_status(),
             "active_trades": len(self._active_trades),
             "pending_legs": len(self._pending_legs),
