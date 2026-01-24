@@ -51,12 +51,10 @@ class Config:
     # ==========================================================================
     # AI Zone Modes
     # ==========================================================================
-    # skip: Treat AI_REFLECT zone as SKIP (fast backtesting) - DEPRECATED
-    # heuristic: Use entry_aggression trait (V3 style) - DEPRECATED
+    # skip: Treat AI_REFLECT zone as SKIP (fast backtesting, no LLM calls)
     # llm: Real Ollama calls (works without GPU, moderate speed)
     # vllm: vLLM with prefix caching (fast, requires GPU)
-    #
-    # NOTE: Always use LLM/vLLM for AI decisions - no heuristics or skips
+    # unified: ML layer UnifiedTradingInference
     AI_ZONE_BACKTEST_MODE = "llm"  # Always use LLM for real AI decisions
     AI_ZONE_LIVE_MODE = "vllm"  # Use vLLM for live trading
 

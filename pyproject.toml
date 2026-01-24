@@ -6,6 +6,9 @@
 name = "Fast_Swarm"
 version = "0.1.0"
 requires-python = ">=3.12"
+dependencies = [
+    "quantstats>=0.0.62",
+]
 
 [build-system]
 requires = ["setuptools>=61.0"]

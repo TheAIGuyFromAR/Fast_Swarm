@@ -17,19 +17,86 @@ Features:
 import math
 import re
 from dataclasses import dataclass
+from typing import Any
 
 from Fast_Swarm.local_agents.shared.confidence import (
     evaluate_condition_confidence,
 )
 
+# Rate-limit indicator resolution warnings (log each indicator failure only once)
+_warned_indicators: set[str] = set()
+
+
 # =============================================================================
-# Indicator Name Mapping (V3 Canonical → pandas_ta → PostgreSQL enhanced_candles)
+# Indicator Name Mapping (V3 Canonical -> pandas_ta -> PostgreSQL enhanced_candles)
 #
 # MERGED FROM: local-utilities/metrics/pattern_matcher.py (~340 aliases)
 # This is the CANONICAL indicator alias mapping for Coinswarm.
 # =============================================================================
 
 INDICATOR_ALIASES = {
+    # =========================================================================
+    # Motion Derivatives (from analyze_motion_derivatives.py)
+    # These are 1st-6th order derivatives of price and indicators
+    # Stored in data/derivatives/ partitioned parquet files
+    # =========================================================================
+    # Price derivatives (close)
+    "velocity": "close_velocity_zscore",
+    "acceleration": "close_acceleration_zscore",
+    "jerk": "close_jerk_zscore",
+    "snap": "close_snap_zscore",
+    "crackle": "close_crackle_zscore",
+    "pop": "close_pop_zscore",
+    # Explicit close prefix versions
+    "closeVelocity": "close_velocity_zscore",
+    "closeAcceleration": "close_acceleration_zscore",
+    "closeJerk": "close_jerk_zscore",
+    "closeSnap": "close_snap_zscore",
+    "closeCrackle": "close_crackle_zscore",
+    "closePop": "close_pop_zscore",
+    # Snake_case versions
+    "close_velocity": "close_velocity_zscore",
+    "close_acceleration": "close_acceleration_zscore",
+    "close_jerk": "close_jerk_zscore",
+    "close_snap": "close_snap_zscore",
+    "close_crackle": "close_crackle_zscore",
+    "close_pop": "close_pop_zscore",
+    # Raw (non-normalized) versions
+    "velocityRaw": "close_velocity",
+    "accelerationRaw": "close_acceleration",
+    "jerkRaw": "close_jerk",
+    "snapRaw": "close_snap",
+    "crackleRaw": "close_crackle",
+    "popRaw": "close_pop",
+    # RSI derivatives
+    "rsiVelocity": "rsi_14_velocity_zscore",
+    "rsiAcceleration": "rsi_14_acceleration_zscore",
+    "rsiJerk": "rsi_14_jerk_zscore",
+    "rsi_velocity": "rsi_14_velocity_zscore",
+    "rsi_acceleration": "rsi_14_acceleration_zscore",
+    "rsi_jerk": "rsi_14_jerk_zscore",
+    # MACD derivatives
+    "macdVelocity": "macd_histogram_velocity_zscore",
+    "macdAcceleration": "macd_histogram_acceleration_zscore",
+    "macdJerk": "macd_histogram_jerk_zscore",
+    "macd_velocity": "macd_histogram_velocity_zscore",
+    "macd_acceleration": "macd_histogram_acceleration_zscore",
+    "macd_jerk": "macd_histogram_jerk_zscore",
+    # OBV derivatives (volume momentum)
+    "obvVelocity": "obv_velocity_zscore",
+    "obvAcceleration": "obv_acceleration_zscore",
+    "obv_velocity": "obv_velocity_zscore",
+    "obv_acceleration": "obv_acceleration_zscore",
+    # ATR derivatives (volatility change)
+    "atrVelocity": "atr_14_velocity_zscore",
+    "atrAcceleration": "atr_14_acceleration_zscore",
+    "atr_velocity": "atr_14_velocity_zscore",
+    "atr_acceleration": "atr_14_acceleration_zscore",
+    # Divergence flags (boolean)
+    "accelJerkDiv": "close_accel_jerk_div",
+    "priceRsiDiv": "price_vs_rsi_vel_div",
+    "accel_jerk_divergence": "close_accel_jerk_div",
+    "price_rsi_divergence": "price_vs_rsi_vel_div",
     # =========================================================================
     # Momentum Indicators
     # =========================================================================
@@ -40,6 +107,7 @@ INDICATOR_ALIASES = {
     "RSI_14": "rsi_14",
     "RSI_7": "rsi_7",
     "RSI_21": "rsi_21",
+    "macd": "macd_line",
     "macdLine": "macd_line",
     "macdSignal": "macd_signal",
     "macdHistogram": "macd_histogram",
@@ -115,23 +183,29 @@ INDICATOR_ALIASES = {
     # =========================================================================
     "atr14": "atr_14",
     "atr": "atr_14",
+    "atr_14": "atr_14",
+    "atr7": "atr_7",
+    "atr_7": "atr_7",
     "ATRr_14": "atr_14",
+    "ATRr_7": "atr_7",
     "natr14": "natr_14",
     "natr": "natr_14",
     "NATR_14": "natr_14",
-    "bollingerBandwidth": "bb_width",
+    "bollingerBandwidth": "bb_bandwidth",
     "bollingerPercentB": "bb_percent",
-    "bbBandwidth": "bb_width",
+    "bbBandwidth": "bb_bandwidth",
     "bbPercentB": "bb_percent",
     "bbUpper": "bb_upper",
     "bbLower": "bb_lower",
     "bbMiddle": "bb_middle",
-    "BBB_5_2.0_2.0": "bb_width",
+    "BBB_5_2.0_2.0": "bb_bandwidth",
     "BBP_5_2.0_2.0": "bb_percent",
     "BBU_5_2.0_2.0": "bb_upper",
     "BBL_5_2.0_2.0": "bb_lower",
     "BBM_5_2.0_2.0": "bb_middle",
-    "BBW_20": "bb_width",
+    "BBW_20": "bb_bandwidth",
+    "BBW_5": "bb_bandwidth",
+    "bb_width": "bb_bandwidth",
     "PERCENT_B": "bb_percent",
     "bb_percent_b": "bb_percent",
     "bollingerUpper": "bb_upper",
@@ -272,9 +346,9 @@ INDICATOR_ALIASES = {
     # =========================================================================
     # Linear Regression
     # =========================================================================
-    "linregSlope": "linreg",
-    "linreg": "linreg",
-    "LINREG_14": "linreg",
+    "linregSlope": "linreg_14",
+    "linreg": "linreg_14",
+    "LINREG_14": "linreg_14",
     # =========================================================================
     # Mass Index
     # =========================================================================
@@ -284,21 +358,23 @@ INDICATOR_ALIASES = {
     # =========================================================================
     # Statistical Indicators
     # =========================================================================
-    "vhf": "vhf",
-    "VHF_28": "vhf",
+    "vhf": "vhf_28",
+    "VHF_28": "vhf_28",
     "entropy": "entropy",
     "ENTROPY_10": "entropy",
     "kurtosis": "kurtosis",
     "KURTOSIS_10": "kurtosis",
     "skew": "skew",
     "SKEW_10": "skew",
-    "zscore": "zscore_14",
-    "zscore50": "zscore_50",
-    "ZSCORE_10": "zscore_14",
-    "ZSCORE_20": "zscore_14",
-    "ZS_20": "zscore_14",
-    "ZS_30": "zscore_30",
-    "ZS_50": "zscore_50",
+    # Map pandas_ta zscore names to our motion derivative zscores
+    # ZS_* patterns use these for mean reversion signals
+    "zscore": "close_velocity_zscore",
+    "zscore50": "close_acceleration_zscore",
+    "ZSCORE_10": "close_velocity_zscore",
+    "ZSCORE_20": "close_velocity_zscore",
+    "ZS_20": "close_velocity_zscore",
+    "ZS_30": "close_acceleration_zscore",
+    "ZS_50": "close_acceleration_zscore",
     # =========================================================================
     # Cross-Asset Metrics
     # =========================================================================
@@ -343,7 +419,37 @@ INDICATOR_ALIASES = {
     # =========================================================================
     "BIAS_26": "bias_26",
     "BIAS_SMA_26": "bias_26",
-    "maCross": "bias_26",
+    "bias": "bias_26",
+    "bias_26": "bias_26",
+    # =========================================================================
+    # PPO (Percentage Price Oscillator)
+    # =========================================================================
+    "ppo": "ppo",
+    "PPO_12_26_9": "ppo",
+    # =========================================================================
+    # PVI (Positive Volume Index) - pandas_ta applies EMA(13) by default
+    # =========================================================================
+    "pvi": "pvi",
+    "pvi_ema": "pvi",
+    "PVI_13": "pvi",
+    # =========================================================================
+    # Ulcer Index
+    # =========================================================================
+    "ui_14": "ui_14",
+    "ulcerIndex": "ui_14",
+    "UI_14": "ui_14",
+    # =========================================================================
+    # Supertrend direction (1=bullish, -1=bearish)
+    # =========================================================================
+    "supertrend_direction": "supertrend_direction",
+    "supertrendDirection": "supertrend_direction",
+    "SUPERTd_7_3.0": "supertrend_direction",
+    # =========================================================================
+    # Z-Score (30-period price z-score: (close - sma_30) / stdev_30)
+    # =========================================================================
+    "zscore_30": "zscore_30",
+    "zscore30": "zscore_30",
+    "ZS_30": "zscore_30",
     # =========================================================================
     # Cross signals (computed - use histogram as proxy)
     # =========================================================================
@@ -357,8 +463,17 @@ INDICATOR_ALIASES = {
     "cvi": "atr_14",
 }
 
-# Reverse mapping: PostgreSQL columns → canonical short names
+# Reverse mapping: PostgreSQL columns -> canonical short names
 INDICATOR_CANONICAL = {v: k for k, v in INDICATOR_ALIASES.items()}
+
+# Reverse alias lookup: canonical_target -> list of raw names that map to it
+# Used when canonical name not found in available columns (tries raw pandas_ta names)
+REVERSE_ALIASES: dict[str, list[str]] = {}
+for _raw_name, _canonical in INDICATOR_ALIASES.items():
+    _canonical_lower = _canonical.lower()
+    if _canonical_lower not in REVERSE_ALIASES:
+        REVERSE_ALIASES[_canonical_lower] = []
+    REVERSE_ALIASES[_canonical_lower].append(_raw_name.lower())
 
 
 # =============================================================================
@@ -446,6 +561,170 @@ COMPUTED_INDICATORS = {
 }
 
 
+def validate_pattern_conditions(
+    entry_conditions: list[dict],
+) -> dict[str, Any]:
+    """
+    Validate that all indicators in a pattern's entry conditions can be resolved.
+
+    Checks each indicator against INDICATOR_ALIASES and COMPUTED_INDICATORS.
+    Patterns with unresolvable indicators can NEVER generate trades.
+
+    Args:
+        entry_conditions: List of condition dicts with 'indicator' key.
+
+    Returns:
+        Dict with validation result:
+        - {"status": "valid"} if all indicators resolvable
+        - {"status": "invalid", "unresolvable": [...], "validated_at": "..."}
+    """
+    from datetime import datetime
+
+    if not entry_conditions:
+        return {"status": "valid", "validated_at": datetime.utcnow().isoformat()}
+
+    unresolvable = []
+    for cond in entry_conditions:
+        if not isinstance(cond, dict):
+            continue
+        indicator_name = cond.get("indicator", "")
+        if not indicator_name:
+            continue
+
+        # Check 1: Is it in INDICATOR_ALIASES (any case variation)?
+        name_lower = indicator_name.lower().replace(" ", "").replace("-", "_")
+        found_alias = (
+            indicator_name in INDICATOR_ALIASES
+            or name_lower in INDICATOR_ALIASES
+            or indicator_name.lower() in INDICATOR_ALIASES
+        )
+
+        # Check 2: Is it in COMPUTED_INDICATORS?
+        found_computed = indicator_name in COMPUTED_INDICATORS
+
+        if not found_alias and not found_computed:
+            unresolvable.append(indicator_name)
+
+    if unresolvable:
+        return {
+            "status": "invalid",
+            "unresolvable": unresolvable,
+            "validated_at": datetime.utcnow().isoformat(),
+        }
+
+    return {"status": "valid", "validated_at": datetime.utcnow().isoformat()}
+
+
+def resolve_indicator_name(name: str) -> str | None:
+    """
+    Resolve any indicator name variant to its canonical DB column name.
+
+    Tries exact match, lowercase, underscore-normalized, and camelCase variants.
+
+    Args:
+        name: Raw indicator name from LLM or pattern (e.g., "RSI_14", "rsi14", "rsiValue")
+
+    Returns:
+        Canonical DB column name (e.g., "rsi_14"), or None if truly unresolvable.
+    """
+    if not name:
+        return None
+
+    # Direct match
+    if name in INDICATOR_ALIASES:
+        return INDICATOR_ALIASES[name]
+
+    # Lowercase match
+    lower = name.lower()
+    if lower in INDICATOR_ALIASES:
+        return INDICATOR_ALIASES[lower]
+
+    # Normalized: strip spaces/hyphens, lowercase
+    normalized = lower.replace(" ", "").replace("-", "_")
+    if normalized in INDICATOR_ALIASES:
+        return INDICATOR_ALIASES[normalized]
+
+    # Check if it's already a canonical target (a DB column name)
+    canonical_targets = set(INDICATOR_ALIASES.values())
+    if name in canonical_targets or lower in canonical_targets:
+        return lower if lower in canonical_targets else name
+
+    # Check computed indicators (these don't map to columns, they compute on-the-fly)
+    if name in COMPUTED_INDICATORS:
+        return name  # Keep as-is, handled by compute_derived_indicator()
+
+    return None
+
+
+def normalize_pattern_conditions(conditions: list[dict]) -> tuple[list[dict], list[str]]:
+    """
+    Normalize all indicator names in a condition list to canonical DB column names.
+
+    For each condition:
+    - If the indicator name resolves via INDICATOR_ALIASES -> replace with canonical name
+    - If unresolvable -> remove the condition and track it
+
+    This is the preemptive fix: called BEFORE patterns are inserted into the DB,
+    so LLM hallucinations get auto-corrected rather than creating broken patterns.
+
+    Args:
+        conditions: List of condition dicts, each with an 'indicator' key.
+
+    Returns:
+        Tuple of (normalized_conditions, removed_indicators):
+        - normalized_conditions: Cleaned list with canonical indicator names
+        - removed_indicators: List of indicator names that could not be resolved
+    """
+    if not conditions:
+        return [], []
+
+    normalized = []
+    removed = []
+
+    for cond in conditions:
+        if not isinstance(cond, dict):
+            continue
+
+        indicator_name = cond.get("indicator", "")
+        if not indicator_name:
+            # Condition without indicator - keep as-is (might be a meta-condition)
+            normalized.append(cond)
+            continue
+
+        canonical = resolve_indicator_name(indicator_name)
+
+        if canonical is not None:
+            # Resolved - replace with canonical name
+            fixed_cond = dict(cond)
+            fixed_cond["indicator"] = canonical
+            normalized.append(fixed_cond)
+        else:
+            # Truly unresolvable - remove this condition
+            removed.append(indicator_name)
+
+    return normalized, removed
+
+
+def get_valid_indicator_names() -> list[str]:
+    """
+    Get the complete list of valid indicator names for LLM prompts.
+
+    Returns canonical DB column names (the TARGET values of INDICATOR_ALIASES),
+    deduplicated and sorted. This is the authoritative "menu" of indicators
+    the LLM should use when generating patterns.
+
+    Returns:
+        Sorted list of canonical indicator names (e.g., ["adx_14", "atr_14", ...])
+    """
+    # Canonical targets from aliases
+    canonical = set(INDICATOR_ALIASES.values())
+
+    # Add computed indicators (they're also valid, just computed on-the-fly)
+    canonical.update(COMPUTED_INDICATORS)
+
+    return sorted(canonical)
+
+
 def compute_derived_indicator(
     name: str,
     indicators: dict[str, float],
@@ -473,8 +752,8 @@ def compute_derived_indicator(
     # MA Cross indicators - return 1 (bullish cross), -1 (bearish cross), or 0
     # ==========================================================================
     if name == "maCross":
-        # Get MA periods from params
-        fast_period = params.get("fastPeriod", 20)
+        # Get MA periods from params (default 21/50 matches calculate_indicators_fast output)
+        fast_period = params.get("fastPeriod", 21)
         slow_period = params.get("slowPeriod", 50)
         fast_type = params.get("fastType", "ema").lower()
         slow_type = params.get("slowType", "sma").lower()
@@ -827,6 +1106,41 @@ def compute_derived_indicator(
 # Indicator bounds for confidence calculation
 # Uses PostgreSQL enhanced_candles column names (lowercase with underscores)
 INDICATOR_BOUNDS = {
+    # =========================================================================
+    # Motion Derivatives (z-score normalized, typically -5 to 5)
+    # =========================================================================
+    # Close price derivatives
+    "close_velocity_zscore": (-5, 5),
+    "close_acceleration_zscore": (-5, 5),
+    "close_jerk_zscore": (-5, 5),
+    "close_snap_zscore": (-5, 5),
+    "close_crackle_zscore": (-5, 5),
+    "close_pop_zscore": (-5, 5),
+    # Raw derivatives (unbounded, use large range)
+    "close_velocity": (-1000, 1000),
+    "close_acceleration": (-500, 500),
+    "close_jerk": (-200, 200),
+    "close_snap": (-100, 100),
+    "close_crackle": (-50, 50),
+    "close_pop": (-25, 25),
+    # RSI derivatives (z-score)
+    "rsi_14_velocity_zscore": (-5, 5),
+    "rsi_14_acceleration_zscore": (-5, 5),
+    "rsi_14_jerk_zscore": (-5, 5),
+    # MACD derivatives (z-score)
+    "macd_histogram_velocity_zscore": (-5, 5),
+    "macd_histogram_acceleration_zscore": (-5, 5),
+    "macd_histogram_jerk_zscore": (-5, 5),
+    # OBV derivatives (z-score)
+    "obv_velocity_zscore": (-5, 5),
+    "obv_acceleration_zscore": (-5, 5),
+    # ATR derivatives (z-score)
+    "atr_14_velocity_zscore": (-5, 5),
+    "atr_14_acceleration_zscore": (-5, 5),
+    # Divergence flags (boolean: 0 or 1)
+    "close_accel_jerk_div": (0, 1),
+    "price_vs_rsi_vel_div": (0, 1),
+    # =========================================================================
     # RSI variants (0-100)
     "rsi_14": (0, 100),
     "rsi_7": (0, 100),
@@ -884,6 +1198,14 @@ INDICATOR_BOUNDS = {
     "skew": (-3, 3),
     # Ultimate Oscillator (0-100)
     "uo": (0, 100),
+    # PPO (Percentage Price Oscillator, -5 to 5 typically)
+    "ppo": (-5, 5),
+    # PVI (Positive Volume Index, cumulative)
+    "pvi": (-1e6, 1e6),
+    # Ulcer Index (0-100)
+    "ui_14": (0, 100),
+    # Supertrend direction (-1=bearish, 1=bullish)
+    "supertrend_direction": (-1, 1),
     # Awesome Oscillator (typically -50 to 50)
     "ao": (-50, 50),
     # Choppiness (0-100)
@@ -918,37 +1240,42 @@ def resolve_indicator(name: str, available: set[str]) -> str | None:
     Returns:
         Resolved column name or None.
     """
-    # Direct match
-    if name in available:
-        return name
-
-    # Alias lookup
-    if name in INDICATOR_ALIASES:
-        alias = INDICATOR_ALIASES[name]
-        if alias in available:
-            return alias
-
-    # Case-insensitive search
+    # Build lowercase lookup set once for efficiency
+    available_lower = {col.lower(): col for col in available}
     name_lower = name.lower()
-    for col in available:
-        if col.lower() == name_lower:
-            return col
+
+    # Direct match (case-insensitive)
+    if name_lower in available_lower:
+        return available_lower[name_lower]
+
+    # Alias lookup (also case-insensitive on both sides)
+    alias = INDICATOR_ALIASES.get(name) or INDICATOR_ALIASES.get(name_lower)
+    if alias:
+        alias_lower = alias.lower()
+        if alias_lower in available_lower:
+            return available_lower[alias_lower]
+        # Reverse lookup: find any available column whose alias maps to same canonical
+        # Handles case where DataFrame still uses raw pandas_ta names (e.g. fisherts_9)
+        if alias_lower in REVERSE_ALIASES:
+            for alt_name in REVERSE_ALIASES[alias_lower]:
+                if alt_name in available_lower:
+                    return available_lower[alt_name]
 
     # Convert camelCase to snake_case and try again
     # aroonOsc -> aroon_osc, stochRsi -> stoch_rsi, macdLine -> macd_line
     snake_name = re.sub(r"([a-z])([A-Z])", r"\1_\2", name).lower()
-    if snake_name in available:
-        return snake_name
+    if snake_name in available_lower:
+        return available_lower[snake_name]
 
-    # Also try snake_case without trailing numbers
-    for col in available:
+    # Also try snake_case prefix/suffix matching
+    for col_lower, col_original in available_lower.items():
         # Match if column starts with snake_name (handles period suffixes)
-        if col.lower().startswith(snake_name):
-            return col
+        if col_lower.startswith(snake_name):
+            return col_original
         # Match if snake_name starts with column (handles missing periods)
-        col_base = col.lower().rstrip("_0123456789")
+        col_base = col_lower.rstrip("_0123456789")
         if snake_name.startswith(col_base) and col_base:
-            return col
+            return col_original
 
     # Fuzzy period matching: ema_20 might be stored as ema_21
     period_match = re.match(r"([a-z_]+)(\d+)", snake_name)
@@ -958,8 +1285,8 @@ def resolve_indicator(name: str, available: set[str]) -> str | None:
         # Try nearby periods
         for try_period in [period, period + 1, period - 1]:
             try_name = f"{base}_{try_period}"
-            if try_name in available:
-                return try_name
+            if try_name in available_lower:
+                return available_lower[try_name]
 
     return None
 
@@ -1051,7 +1378,7 @@ def evaluate_conditions(
     details = []
     confidences = []
     met_count = 0
-
+    _shown_available = False  # Only show available columns once per call
     for indicator_name, condition in conditions.items():
         operator = condition.get("operator", ">")
         threshold = condition.get("value", condition.get("threshold", 0))
@@ -1068,6 +1395,18 @@ def evaluate_conditions(
                 indicators[indicator_name] = computed_value  # Add to indicators dict
 
         if resolved is None:
+            # Rate-limited diagnostic: only log each indicator failure ONCE per process
+            if indicator_name not in _warned_indicators:
+                _warned_indicators.add(indicator_name)
+                if not _shown_available:
+                    sample_cols = sorted(list(available))[:20]
+                    print(f"  [PatternMatch] Available columns ({len(available)} total): {sample_cols}")
+                    _shown_available = True
+                alias = INDICATOR_ALIASES.get(indicator_name)
+                # Sanitize for Windows cp1252 console (pattern data may contain Greek letters)
+                safe_name = indicator_name.encode("ascii", errors="replace").decode("ascii")
+                safe_alias = str(alias).encode("ascii", errors="replace").decode("ascii") if alias else "None"
+                print(f"  [PatternMatch] FAILED to resolve: '{safe_name}' -> alias='{safe_alias}' (not in available)")
             details.append(
                 {
                     "indicator": indicator_name,

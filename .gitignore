@@ -45,3 +45,16 @@ Thumbs.db
 nul
 __pycache__/Database.cpython-312.pyc
 __pycache__/Database.cpython-312.pyc
+
+# Large binary/data files
+*.parquet
+*.csv
+*.png
+*.db
+*.sql
+audit_output/
+**/audit*
+**/REPORT*
+*report*
+data/
+server.log

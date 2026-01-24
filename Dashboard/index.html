@@ -44,9 +44,13 @@
                 <span class="nav-icon">&#9733;</span>
                 AGENTS
             </button>
-            <button class="nav-btn" data-page="trades">
-                <span class="nav-icon">&#8644;</span>
-                TRADES
+            <button class="nav-btn" data-page="trading">
+                <span class="nav-icon">&#9888;</span>
+                TRADING
+            </button>
+            <button class="nav-btn" data-page="taskmaster">
+                <span class="nav-icon">&#9881;</span>
+                TASKMASTER
             </button>
         </nav>
 
@@ -183,6 +187,44 @@
                     <h2>MARKET INTELLIGENCE</h2>
                 </div>
                 <div class="market-grid">
+                    <!-- Bear Protection Regime Indicator -->
+                    <div class="market-card wide regime-card">
+                        <div class="panel-header">BEAR PROTECTION REGIME</div>
+                        <div class="regime-display">
+                            <div class="regime-gauge">
+                                <div class="regime-bar">
+                                    <div class="regime-fill" id="regime-fill"></div>
+                                    <div class="regime-marker" id="regime-marker"></div>
+                                </div>
+                                <div class="regime-labels">
+                                    <span class="regime-label-left">DEFENSIVE</span>
+                                    <span class="regime-label-center">NEUTRAL</span>
+                                    <span class="regime-label-right">AGGRESSIVE</span>
+                                </div>
+                            </div>
+                            <div class="regime-info">
+                                <div class="regime-value-box">
+                                    <span class="regime-value" id="regime-value">NEUTRAL</span>
+                                    <span class="regime-score" id="regime-score">0.00</span>
+                                </div>
+                                <div class="regime-limits">
+                                    <span class="regime-limit-label">MAX POSITION:</span>
+                                    <span class="regime-limit-value" id="regime-limit">65%</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="utilization-bar">
+                            <div class="utilization-label">UTILIZATION</div>
+                            <div class="utilization-track">
+                                <div class="utilization-fill" id="utilization-fill"></div>
+                                <div class="utilization-limit-line" id="utilization-limit-line"></div>
+                            </div>
+                            <div class="utilization-stats">
+                                <span id="utilization-invested">$0 (0%)</span>
+                                <span id="utilization-headroom">Headroom: 65%</span>
+                            </div>
+                        </div>
+                    </div>
                     <div class="market-card wide">
                         <div class="panel-header">FEAR & GREED INDEX</div>
                         <div class="fear-greed-gauge">
@@ -335,43 +377,162 @@
                 </div>
             </section>
 
-            <!-- Page: Trades -->
-            <section class="page" id="page-trades">
+            <!-- Page: Trading (Live/Paper + Approval Queue) -->
+            <section class="page" id="page-trading">
                 <div class="page-header">
-                    <h2>TRADE HISTORY</h2>
-                    <div class="filter-controls">
-                        <select id="filter-agent">
-                            <option value="">All Agents</option>
-                        </select>
-                        <select id="filter-asset">
-                            <option value="">All Assets</option>
-                            <option value="BTC">BTC</option>
-                            <option value="ETH">ETH</option>
-                            <option value="SOL">SOL</option>
-                        </select>
-                        <input type="number" id="filter-limit" value="100" min="10" max="500" placeholder="Limit">
+                    <h2>LIVE TRADING</h2>
+                    <div class="mode-indicator" id="trading-mode-badge">
+                        <span class="mode-label">MODE:</span>
+                        <span class="mode-value" id="current-mode">--</span>
                     </div>
                 </div>
-                <div class="stats-bar" id="trade-stats">
+
+                <!-- Pending Approvals Section -->
+                <div class="approval-section">
+                    <div class="panel-header">
+                        PENDING APPROVALS
+                        <span class="pending-count" id="pending-count">0</span>
+                    </div>
+                    <div class="approval-actions">
+                        <button class="action-btn primary" id="btn-approve-all" onclick="approveAllPending()">
+                            APPROVE ALL
+                        </button>
+                        <button class="action-btn danger" id="btn-reject-all" onclick="rejectAllPending()">
+                            REJECT ALL
+                        </button>
+                    </div>
+                    <div class="approval-queue" id="approval-queue">
+                        <div class="no-pending">No pending trades</div>
+                    </div>
+                </div>
+
+                <!-- Stats Bar -->
+                <div class="stats-bar" id="trading-stats">
                     <div class="stat-card">
-                        <div class="stat-value" id="stat-trade-total">--</div>
-                        <div class="stat-label">TOTAL TRADES</div>
+                        <div class="stat-value" id="stat-pending">0</div>
+                        <div class="stat-label">PENDING</div>
                     </div>
                     <div class="stat-card">
-                        <div class="stat-value green" id="stat-trade-pnl">--</div>
-                        <div class="stat-label">TOTAL P&L</div>
+                        <div class="stat-value cyan" id="stat-open-positions">0</div>
+                        <div class="stat-label">OPEN POSITIONS</div>
                     </div>
                     <div class="stat-card">
-                        <div class="stat-value cyan" id="stat-trade-winrate">--</div>
-                        <div class="stat-label">WIN RATE</div>
+                        <div class="stat-value green" id="stat-today-pnl">$0</div>
+                        <div class="stat-label">TODAY P&L</div>
                     </div>
                     <div class="stat-card">
-                        <div class="stat-value yellow" id="stat-trade-avg">--</div>
-                        <div class="stat-label">AVG TRADE</div>
+                        <div class="stat-value yellow" id="stat-exchange-status">--</div>
+                        <div class="stat-label">EXCHANGE</div>
                     </div>
+                </div>
+
+                <!-- Open Positions -->
+                <div class="positions-panel">
+                    <div class="panel-header">OPEN POSITIONS</div>
+                    <div class="leaderboard-table" id="positions-table">
+                        <div class="no-pending">No open positions</div>
+                    </div>
+                </div>
+
+                <!-- Recent Live/Paper Trades -->
+                <div class="recent-trades-panel">
+                    <div class="panel-header">RECENT TRADES (PAPER/LIVE)</div>
+                    <div class="leaderboard-table" id="live-trades-table">
+                        <div class="table-loading">Loading trades...</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Page: Trades (Historical Backtest) - Hidden -->
+            <section class="page" id="page-trades" style="display: none;">
+                <div class="page-header">
+                    <h2>BACKTEST HISTORY (ARCHIVED)</h2>
                 </div>
                 <div class="leaderboard-table" id="trades-table">
-                    <div class="table-loading">Loading trades...</div>
+                    <div class="no-pending">Backtest history archived</div>
+                </div>
+            </section>
+
+            <!-- Page: Taskmaster (System Health & Interventions) -->
+            <section class="page" id="page-taskmaster">
+                <div class="page-header">
+                    <h2>TASKMASTER</h2>
+                    <span class="page-subtitle">System Health & Interventions</span>
+                </div>
+
+                <!-- Health Status Row -->
+                <div class="stats-row" id="taskmaster-health-row">
+                    <div class="stat-card">
+                        <div class="stat-label">SYSTEM STATUS</div>
+                        <div class="stat-value" id="tm-system-status">--</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">COMPONENTS</div>
+                        <div class="stat-value" id="tm-component-count">--</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">UPTIME</div>
+                        <div class="stat-value" id="tm-uptime">--</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">CHECKS</div>
+                        <div class="stat-value" id="tm-checks">--</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">POKES SENT</div>
+                        <div class="stat-value" id="tm-pokes">--</div>
+                    </div>
+                </div>
+
+                <!-- Components Grid -->
+                <div class="section-header">
+                    <h3>MONITORED COMPONENTS</h3>
+                </div>
+                <div class="components-grid" id="tm-components-grid">
+                    <!-- Populated by JS -->
+                </div>
+
+                <!-- Intervention Buttons -->
+                <div class="section-header">
+                    <h3>INTERVENTIONS</h3>
+                </div>
+                <div class="intervention-row">
+                    <button class="action-btn" id="btn-poke-orchestrator" onclick="pokeOrchestrator()">
+                        <span class="btn-icon">&#9888;</span> POKE ORCHESTRATOR
+                    </button>
+                    <button class="action-btn" id="btn-clear-errors" onclick="clearErrors()">
+                        <span class="btn-icon">&#10006;</span> CLEAR ERRORS
+                    </button>
+                    <button class="action-btn warning" id="btn-skip-phase" onclick="skipPhase()">
+                        <span class="btn-icon">&#9654;</span> SKIP PHASE
+                    </button>
+                    <button class="action-btn danger" id="btn-restart-orchestrator" onclick="restartOrchestrator()">
+                        <span class="btn-icon">&#8635;</span> RESTART
+                    </button>
+                </div>
+                <div class="intervention-row">
+                    <button class="action-btn success" id="btn-force-evolution" onclick="forceEvolution()">
+                        <span class="btn-icon">&#9733;</span> FORCE EVOLUTION
+                    </button>
+                    <button class="action-btn success" id="btn-force-crucible" onclick="forceCrucible()">
+                        <span class="btn-icon">&#9670;</span> FORCE CRUCIBLE
+                    </button>
+                </div>
+
+                <!-- Activity Log -->
+                <div class="section-header">
+                    <h3>ACTIVITY LOG</h3>
+                </div>
+                <div class="activity-log" id="tm-activity-log">
+                    <!-- Populated by JS -->
+                </div>
+
+                <!-- Alerts -->
+                <div class="section-header">
+                    <h3>ALERTS</h3>
+                </div>
+                <div class="alerts-list" id="tm-alerts">
+                    <div class="no-alerts">No active alerts</div>
                 </div>
             </section>
         </main>

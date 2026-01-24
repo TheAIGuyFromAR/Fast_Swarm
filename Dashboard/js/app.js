@@ -58,6 +58,7 @@ function navigateTo(page) {
         case 'patterns': fetchPatternsData(); break;
         case 'agents': fetchAgentsData(); break;
         case 'trades': fetchTradesData(); break;
+        case 'trading': fetchTradingData(); break;
     }
 }
 
@@ -266,6 +267,7 @@ async function fetchAllData() {
             case 'patterns': await fetchPatternsData(); break;
             case 'agents': await fetchAgentsData(); break;
             case 'trades': await fetchTradesData(); break;
+            case 'trading': await fetchTradingData(); break;
         }
         updateLastRefresh();
     } catch (error) {
@@ -294,9 +296,9 @@ async function fetchOrchestratorData() {
 
         if (results[0].status === 'fulfilled' && results[0].value.ok) {
             var stats = await results[0].value.json();
-            // API returns: count, average_fitness, average_traits
-            var agentCount = stats.count || 0;
-            var avgFitness = stats.average_fitness || 0;
+            // API returns: active_count, avg_fitness, fitness_50_plus, specialists, avg_win_rate, etc.
+            var agentCount = stats.active_count || 0;
+            var avgFitness = stats.avg_fitness || 0;
             updateMetric('metric-agents', agentCount || '--');
             updateMetric('metric-fitness', avgFitness ? avgFitness.toFixed(1) : '--');
             updateMetric('metric-elo', '--'); // Not in stats endpoint
@@ -474,6 +476,76 @@ async function fetchMarketData() {
 
     // Fetch funding rates
     fetchFundingRates();
+
+    // Fetch Bear Protection regime
+    try {
+        var regimeRes = await fetch(API_URL + '/market_data/regime');
+        if (regimeRes.ok) {
+            var regime = await regimeRes.json();
+            updateRegime(regime);
+        }
+    } catch (error) {
+        console.error('Regime fetch error:', error);
+    }
+}
+
+function updateRegime(data) {
+    // Update regime value and score
+    var regimeValue = document.getElementById('regime-value');
+    var regimeScore = document.getElementById('regime-score');
+    var regimeLimit = document.getElementById('regime-limit');
+    var regimeMarker = document.getElementById('regime-marker');
+
+    if (data.portfolio) {
+        var regime = data.portfolio.effective_regime;
+        var score = data.portfolio.weighted_regime_score;
+        var maxPos = data.portfolio.max_position_pct;
+
+        if (regimeValue) {
+            regimeValue.textContent = regime;
+            regimeValue.className = 'regime-value ' + regime.toLowerCase();
+        }
+        if (regimeScore) {
+            regimeScore.textContent = 'Score: ' + score.toFixed(2);
+        }
+        if (regimeLimit) {
+            regimeLimit.textContent = maxPos + '%';
+        }
+        if (regimeMarker) {
+            // Score ranges from -1 (defensive) to +1 (aggressive)
+            // Map to 0% (left) to 100% (right)
+            var markerPos = ((score + 1) / 2) * 100;
+            regimeMarker.style.left = markerPos + '%';
+        }
+    }
+
+    // Update utilization bar
+    if (data.utilization) {
+        var utilFill = document.getElementById('utilization-fill');
+        var utilLimit = document.getElementById('utilization-limit-line');
+        var utilInvested = document.getElementById('utilization-invested');
+        var utilHeadroom = document.getElementById('utilization-headroom');
+
+        var investedPct = data.utilization.invested_pct || 0;
+        var limitPct = data.utilization.limit_pct || 65;
+        var investedUsd = data.utilization.invested_usd || 0;
+        var headroomPct = data.utilization.headroom_pct || 0;
+        var overLimit = data.utilization.over_limit || false;
+
+        if (utilFill) {
+            utilFill.style.width = Math.min(investedPct, 100) + '%';
+            utilFill.className = 'utilization-fill' + (overLimit ? ' over-limit' : '');
+        }
+        if (utilLimit) {
+            utilLimit.style.left = limitPct + '%';
+        }
+        if (utilInvested) {
+            utilInvested.textContent = '$' + investedUsd.toLocaleString() + ' (' + investedPct.toFixed(1) + '%)';
+        }
+        if (utilHeadroom) {
+            utilHeadroom.textContent = overLimit ? 'OVER LIMIT!' : 'Headroom: ' + headroomPct.toFixed(1) + '%';
+        }
+    }
 }
 
 function updatePriceDisplays(tickers) {
@@ -608,13 +680,23 @@ function renderPatternsTable() {
         return;
     }
 
-    // Filter out patterns with zero/null fitness (untested chaos patterns)
+    // A pattern is "tested" if it has total_runs > 0 OR last_backtest_at is set
+    // Note: fitness_score can be 0 or negative for tested patterns!
     var testedPatterns = patternsData.filter(function(p) {
-        return p.fitness_score && p.fitness_score > 0;
+        var hasRuns = p.total_runs && parseInt(p.total_runs) > 0;
+        var hasBacktestDate = p.last_backtest_at && p.last_backtest_at !== null;
+        return hasRuns || hasBacktestDate;
     });
 
+    var untestedCount = patternsData.length - testedPatterns.length;
+
+    if (testedPatterns.length === 0 && untestedCount > 0) {
+        container.textContent = 'No backtested patterns yet (' + untestedCount + ' patterns pending backtest)';
+        return;
+    }
+
     if (testedPatterns.length === 0) {
-        container.textContent = 'No backtested patterns yet (all ' + patternsData.length + ' patterns pending backtest)';
+        container.textContent = 'No patterns found';
         return;
     }
 
@@ -1065,6 +1147,493 @@ function updateTradeStats() {
     document.getElementById('stat-trade-pnl').textContent = (totalPnl >= 0 ? '+' : '') + totalPnl.toFixed(2);
     document.getElementById('stat-trade-winrate').textContent = winRate.toFixed(1) + '%';
     document.getElementById('stat-trade-avg').textContent = (avgTrade >= 0 ? '+' : '') + avgTrade.toFixed(2);
+}
+
+// ============================================
+// TRADING PAGE (Live/Paper Trading)
+// ============================================
+
+// State for trading page
+let tradingData = {
+    pending: [],
+    positions: [],
+    recentTrades: [],
+    stats: {},
+    mode: 'PAPER_ONLY'
+};
+
+async function fetchTradingData() {
+    try {
+        var results = await Promise.allSettled([
+            fetch(API_URL + '/trading/approval/pending'),
+            fetch(API_URL + '/trading/approval/stats'),
+            fetch(API_URL + '/trading/positions'),
+            fetch(API_URL + '/trading/trades/recent?limit=50')
+        ]);
+
+        // Pending trades
+        if (results[0].status === 'fulfilled' && results[0].value.ok) {
+            tradingData.pending = await results[0].value.json();
+        } else {
+            tradingData.pending = [];
+        }
+        renderApprovalQueue();
+
+        // Stats
+        if (results[1].status === 'fulfilled' && results[1].value.ok) {
+            tradingData.stats = await results[1].value.json();
+            updateTradingStats();
+        }
+
+        // Positions
+        if (results[2].status === 'fulfilled' && results[2].value.ok) {
+            tradingData.positions = await results[2].value.json();
+        } else {
+            tradingData.positions = [];
+        }
+        renderPositions();
+
+        // Recent live/paper trades
+        if (results[3].status === 'fulfilled' && results[3].value.ok) {
+            tradingData.recentTrades = await results[3].value.json();
+        } else {
+            tradingData.recentTrades = [];
+        }
+        renderLiveTrades();
+
+        // Update mode indicator
+        updateModeIndicator();
+
+    } catch (error) {
+        console.error('Trading data fetch error:', error);
+        addLogEntry('ERROR', 'Trading data fetch failed: ' + error.message);
+    }
+}
+
+function updateTradingStats() {
+    var stats = tradingData.stats;
+    document.getElementById('stat-pending').textContent = stats.total_pending || 0;
+    document.getElementById('pending-count').textContent = stats.total_pending || 0;
+    document.getElementById('stat-open-positions').textContent = tradingData.positions.length || 0;
+
+    // Calculate today's P&L from recent trades
+    var today = new Date().toDateString();
+    var todayPnl = tradingData.recentTrades
+        .filter(function(t) {
+            return t.exit_time && new Date(t.exit_time).toDateString() === today;
+        })
+        .reduce(function(sum, t) {
+            return sum + (t.pnl_usd || 0);
+        }, 0);
+
+    var pnlEl = document.getElementById('stat-today-pnl');
+    if (pnlEl) {
+        pnlEl.textContent = (todayPnl >= 0 ? '+' : '') + '$' + todayPnl.toFixed(2);
+        pnlEl.className = 'stat-value ' + (todayPnl >= 0 ? 'green' : 'red');
+    }
+}
+
+function updateModeIndicator() {
+    var modeEl = document.getElementById('current-mode');
+    if (modeEl) {
+        var mode = tradingData.stats.mode || 'PAPER_ONLY';
+        modeEl.textContent = mode;
+        modeEl.className = 'mode-value mode-' + mode.toLowerCase().replace('_', '-');
+    }
+
+    var statusEl = document.getElementById('stat-exchange-status');
+    if (statusEl) {
+        statusEl.textContent = tradingData.stats.exchange_connected ? 'CONNECTED' : 'OFFLINE';
+        statusEl.className = 'stat-value ' + (tradingData.stats.exchange_connected ? 'green' : 'yellow');
+    }
+}
+
+function renderApprovalQueue() {
+    var container = document.getElementById('approval-queue');
+    if (!container) return;
+
+    var pending = tradingData.pending;
+
+    // Update button states
+    var approveAllBtn = document.getElementById('btn-approve-all');
+    var rejectAllBtn = document.getElementById('btn-reject-all');
+    if (approveAllBtn) approveAllBtn.disabled = pending.length === 0;
+    if (rejectAllBtn) rejectAllBtn.disabled = pending.length === 0;
+
+    // Clear container
+    container.textContent = '';
+
+    if (pending.length === 0) {
+        var noPending = document.createElement('div');
+        noPending.className = 'no-pending';
+        noPending.textContent = 'No pending trades';
+        container.appendChild(noPending);
+        return;
+    }
+
+    pending.forEach(function(trade) {
+        var card = document.createElement('div');
+        card.className = 'approval-card' + (trade.is_bear_protection ? ' bear-protection' : '');
+
+        // Header
+        var header = document.createElement('div');
+        header.className = 'trade-header';
+
+        var symbolSpan = document.createElement('span');
+        symbolSpan.className = 'trade-symbol';
+        symbolSpan.textContent = trade.symbol || 'N/A';
+        header.appendChild(symbolSpan);
+
+        var sideSpan = document.createElement('span');
+        var isBuy = trade.side.toLowerCase() === 'buy' || trade.side.toLowerCase() === 'long';
+        sideSpan.className = 'trade-side ' + (isBuy ? 'side-buy' : 'side-sell');
+        sideSpan.textContent = (trade.side || '').toUpperCase();
+        header.appendChild(sideSpan);
+
+        if (trade.is_bear_protection) {
+            var bearBadge = document.createElement('span');
+            bearBadge.className = 'bear-badge';
+            bearBadge.textContent = 'BEAR PROTECTION';
+            header.appendChild(bearBadge);
+        }
+
+        card.appendChild(header);
+
+        // Details
+        var details = document.createElement('div');
+        details.className = 'trade-details';
+
+        var detailRows = [
+            ['Agent', trade.agent_name || trade.agent_id.slice(-8)],
+            ['Size', '$' + (trade.size_usd || 0).toFixed(2)],
+            ['Price', '$' + (trade.suggested_price || 0).toFixed(2)],
+            ['Reason', trade.reason || '--'],
+            ['Expires', formatExpiry(trade.expires_at)]
+        ];
+
+        detailRows.forEach(function(row) {
+            var detailRow = document.createElement('div');
+            detailRow.className = 'detail-row';
+
+            var label = document.createElement('span');
+            label.className = 'label';
+            label.textContent = row[0] + ':';
+            detailRow.appendChild(label);
+
+            var value = document.createElement('span');
+            value.className = 'value' + (row[0] === 'Reason' ? ' reason' : '');
+            value.textContent = row[1];
+            detailRow.appendChild(value);
+
+            details.appendChild(detailRow);
+        });
+
+        card.appendChild(details);
+
+        // Actions
+        var actions = document.createElement('div');
+        actions.className = 'trade-actions';
+
+        var approveBtn = document.createElement('button');
+        approveBtn.className = 'btn-approve';
+        approveBtn.textContent = 'APPROVE';
+        approveBtn.onclick = function() { approveTrade(trade.trade_id); };
+        actions.appendChild(approveBtn);
+
+        var rejectBtn = document.createElement('button');
+        rejectBtn.className = 'btn-reject';
+        rejectBtn.textContent = 'REJECT';
+        rejectBtn.onclick = function() { rejectTrade(trade.trade_id); };
+        actions.appendChild(rejectBtn);
+
+        card.appendChild(actions);
+        container.appendChild(card);
+    });
+}
+
+function formatExpiry(isoString) {
+    if (!isoString) return '--';
+    var expiry = new Date(isoString);
+    var now = new Date();
+    var diff = expiry - now;
+    if (diff < 0) return 'EXPIRED';
+    var mins = Math.floor(diff / 60000);
+    if (mins < 60) return mins + ' min';
+    var hours = Math.floor(mins / 60);
+    return hours + 'h ' + (mins % 60) + 'm';
+}
+
+async function approveTrade(tradeId) {
+    try {
+        addLogEntry('TRADING', 'Approving trade ' + tradeId.slice(-8) + '...');
+        var response = await fetch(API_URL + '/trading/approval/approve/' + tradeId, { method: 'POST' });
+        var data = await response.json();
+
+        if (response.ok && data.status === 'approved') {
+            addLogEntry('SUCCESS', 'Trade approved and executed');
+            fetchTradingData();
+        } else {
+            addLogEntry('ERROR', 'Approval failed: ' + (data.error || data.detail || 'Unknown error'));
+        }
+    } catch (error) {
+        addLogEntry('ERROR', 'Approval request failed: ' + error.message);
+    }
+}
+
+async function rejectTrade(tradeId) {
+    try {
+        addLogEntry('TRADING', 'Rejecting trade ' + tradeId.slice(-8) + '...');
+        var response = await fetch(API_URL + '/trading/approval/reject/' + tradeId, { method: 'POST' });
+        var data = await response.json();
+
+        if (response.ok && data.status === 'rejected') {
+            addLogEntry('INFO', 'Trade rejected');
+            fetchTradingData();
+        } else {
+            addLogEntry('ERROR', 'Rejection failed: ' + (data.error || data.detail || 'Unknown error'));
+        }
+    } catch (error) {
+        addLogEntry('ERROR', 'Rejection request failed: ' + error.message);
+    }
+}
+
+async function approveAllPending() {
+    if (tradingData.pending.length === 0) {
+        addLogEntry('INFO', 'No pending trades to approve');
+        return;
+    }
+
+    var confirmed = confirm('Approve all ' + tradingData.pending.length + ' pending trades?');
+    if (!confirmed) return;
+
+    addLogEntry('TRADING', 'Approving all pending trades...');
+
+    try {
+        var response = await fetch(API_URL + '/trading/approval/approve-all', { method: 'POST' });
+        var data = await response.json();
+
+        if (response.ok) {
+            addLogEntry('SUCCESS', 'Approved ' + (data.approved_count || 0) + ' trades');
+            if (data.error_count > 0) {
+                addLogEntry('WARNING', data.error_count + ' trades had errors');
+            }
+            fetchTradingData();
+        } else {
+            addLogEntry('ERROR', 'Batch approval failed: ' + (data.detail || 'Unknown error'));
+        }
+    } catch (error) {
+        addLogEntry('ERROR', 'Batch approval request failed: ' + error.message);
+    }
+}
+
+async function rejectAllPending() {
+    if (tradingData.pending.length === 0) {
+        addLogEntry('INFO', 'No pending trades to reject');
+        return;
+    }
+
+    var confirmed = confirm('Reject all ' + tradingData.pending.length + ' pending trades?');
+    if (!confirmed) return;
+
+    addLogEntry('TRADING', 'Rejecting all pending trades...');
+
+    try {
+        var response = await fetch(API_URL + '/trading/approval/reject-all', { method: 'POST' });
+        var data = await response.json();
+
+        if (response.ok) {
+            addLogEntry('INFO', 'Rejected ' + (data.rejected_count || 0) + ' trades');
+            fetchTradingData();
+        } else {
+            addLogEntry('ERROR', 'Batch rejection failed: ' + (data.detail || 'Unknown error'));
+        }
+    } catch (error) {
+        addLogEntry('ERROR', 'Batch rejection request failed: ' + error.message);
+    }
+}
+
+function renderPositions() {
+    var container = document.getElementById('positions-table');
+    if (!container) return;
+
+    var positions = tradingData.positions;
+    container.textContent = '';
+
+    if (positions.length === 0) {
+        var noPending = document.createElement('div');
+        noPending.className = 'no-pending';
+        noPending.textContent = 'No open positions';
+        container.appendChild(noPending);
+        return;
+    }
+
+    var table = document.createElement('table');
+    var thead = document.createElement('thead');
+    var headerRow = document.createElement('tr');
+    ['SYMBOL', 'SIDE', 'SIZE', 'ENTRY', 'CURRENT', 'P&L', 'ACTIONS'].forEach(function(text) {
+        var th = document.createElement('th');
+        th.textContent = text;
+        headerRow.appendChild(th);
+    });
+    thead.appendChild(headerRow);
+    table.appendChild(thead);
+
+    var tbody = document.createElement('tbody');
+    positions.forEach(function(pos) {
+        var pnl = pos.unrealized_pnl || 0;
+        var pnlPct = pos.unrealized_pnl_pct || 0;
+
+        var tr = document.createElement('tr');
+
+        var tdSymbol = document.createElement('td');
+        tdSymbol.textContent = pos.symbol || 'N/A';
+        tr.appendChild(tdSymbol);
+
+        var tdSide = document.createElement('td');
+        var sideUpper = (pos.side || '').toUpperCase();
+        tdSide.style.color = sideUpper === 'LONG' || sideUpper === 'BUY' ? 'var(--neon-green)' : 'var(--neon-red)';
+        tdSide.textContent = sideUpper;
+        tr.appendChild(tdSide);
+
+        var tdSize = document.createElement('td');
+        tdSize.textContent = '$' + (pos.size_usd || 0).toFixed(2);
+        tr.appendChild(tdSize);
+
+        var tdEntry = document.createElement('td');
+        tdEntry.className = 'metric';
+        tdEntry.textContent = '$' + (pos.entry_price || 0).toFixed(2);
+        tr.appendChild(tdEntry);
+
+        var tdCurrent = document.createElement('td');
+        tdCurrent.className = 'metric';
+        tdCurrent.textContent = '$' + (pos.current_price || 0).toFixed(2);
+        tr.appendChild(tdCurrent);
+
+        var tdPnl = document.createElement('td');
+        tdPnl.className = 'metric ' + (pnl >= 0 ? 'positive' : 'negative');
+        tdPnl.textContent = (pnl >= 0 ? '+' : '') + '$' + pnl.toFixed(2) + ' (' + pnlPct.toFixed(2) + '%)';
+        tr.appendChild(tdPnl);
+
+        var tdActions = document.createElement('td');
+        var closeBtn = document.createElement('button');
+        closeBtn.className = 'btn-close-position';
+        closeBtn.textContent = 'CLOSE';
+        closeBtn.onclick = function() { closePosition(pos.agent_id, pos.symbol); };
+        tdActions.appendChild(closeBtn);
+        tr.appendChild(tdActions);
+
+        tbody.appendChild(tr);
+    });
+
+    table.appendChild(tbody);
+    container.appendChild(table);
+}
+
+async function closePosition(agentId, symbol) {
+    var confirmed = confirm('Close position for ' + symbol + '?');
+    if (!confirmed) return;
+
+    addLogEntry('TRADING', 'Closing position ' + symbol + '...');
+
+    try {
+        var response = await fetch(API_URL + '/trading/positions/' + symbol + '/close?agent_id=' + agentId, { method: 'POST' });
+        var data = await response.json();
+
+        if (response.ok) {
+            addLogEntry('SUCCESS', 'Position closed');
+            fetchTradingData();
+        } else {
+            addLogEntry('ERROR', 'Close failed: ' + (data.detail || 'Unknown error'));
+        }
+    } catch (error) {
+        addLogEntry('ERROR', 'Close request failed: ' + error.message);
+    }
+}
+
+function renderLiveTrades() {
+    var container = document.getElementById('live-trades-table');
+    if (!container) return;
+
+    var trades = tradingData.recentTrades;
+    container.textContent = '';
+
+    if (trades.length === 0) {
+        var noTrades = document.createElement('div');
+        noTrades.className = 'no-pending';
+        noTrades.textContent = 'No recent trades';
+        container.appendChild(noTrades);
+        return;
+    }
+
+    var table = document.createElement('table');
+    var thead = document.createElement('thead');
+    var headerRow = document.createElement('tr');
+    ['TIME', 'SOURCE', 'SYMBOL', 'SIDE', 'ENTRY', 'EXIT', 'P&L', 'STATUS'].forEach(function(text) {
+        var th = document.createElement('th');
+        th.textContent = text;
+        headerRow.appendChild(th);
+    });
+    thead.appendChild(headerRow);
+    table.appendChild(thead);
+
+    var tbody = document.createElement('tbody');
+    trades.slice(0, 20).forEach(function(trade) {
+        var pnl = trade.pnl_usd || 0;
+        var time = trade.entry_time ? new Date(trade.entry_time).toLocaleString() : '--';
+        var source = (trade.source || 'paper').toUpperCase();
+
+        var tr = document.createElement('tr');
+
+        var tdTime = document.createElement('td');
+        tdTime.style.fontSize = '0.8em';
+        tdTime.style.color = 'var(--text-secondary)';
+        tdTime.textContent = time;
+        tr.appendChild(tdTime);
+
+        var tdSource = document.createElement('td');
+        var sourceSpan = document.createElement('span');
+        sourceSpan.className = 'source-badge source-' + source.toLowerCase();
+        sourceSpan.textContent = source;
+        tdSource.appendChild(sourceSpan);
+        tr.appendChild(tdSource);
+
+        var tdSymbol = document.createElement('td');
+        tdSymbol.textContent = trade.symbol || 'N/A';
+        tr.appendChild(tdSymbol);
+
+        var tdSide = document.createElement('td');
+        var sideUpper = (trade.side || '').toUpperCase();
+        tdSide.style.color = sideUpper === 'LONG' || sideUpper === 'BUY' ? 'var(--neon-green)' : 'var(--neon-red)';
+        tdSide.textContent = sideUpper;
+        tr.appendChild(tdSide);
+
+        var tdEntry = document.createElement('td');
+        tdEntry.className = 'metric';
+        tdEntry.textContent = trade.entry_price ? '$' + trade.entry_price.toFixed(2) : '--';
+        tr.appendChild(tdEntry);
+
+        var tdExit = document.createElement('td');
+        tdExit.className = 'metric';
+        tdExit.textContent = trade.exit_price ? '$' + trade.exit_price.toFixed(2) : '--';
+        tr.appendChild(tdExit);
+
+        var tdPnl = document.createElement('td');
+        tdPnl.className = 'metric ' + (pnl >= 0 ? 'positive' : 'negative');
+        tdPnl.textContent = trade.exit_price ? ((pnl >= 0 ? '+' : '') + '$' + pnl.toFixed(2)) : '--';
+        tr.appendChild(tdPnl);
+
+        var tdStatus = document.createElement('td');
+        var statusSpan = document.createElement('span');
+        statusSpan.className = 'status-badge ' + (trade.status === 'open' ? 'status-open' : 'status-closed');
+        statusSpan.textContent = (trade.status || 'open').toUpperCase();
+        tdStatus.appendChild(statusSpan);
+        tr.appendChild(tdStatus);
+
+        tbody.appendChild(tr);
+    });
+
+    table.appendChild(tbody);
+    container.appendChild(table);
 }
 
 // ============================================

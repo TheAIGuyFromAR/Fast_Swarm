@@ -29,6 +29,7 @@ class TradeData:
     entry_price: float = 0.0
     exit_price: float = 0.0
     size: float = 0.0
+    position_size_pct: float = 1.0  # Position size as fraction of portfolio (1.0 = 100%)
 
 
 @dataclass
@@ -98,46 +99,19 @@ def ev_gate(ev: float) -> bool:
 
 def calculate_ev_multiplier(ev: float) -> float:
     """
-    Calculate EV multiplier using piecewise linear interpolation.
+    Calculate EV multiplier using V4 hard gate.
 
-    EV=0% → 0.35
-    EV=1% → 0.8
-    EV=3% → 1.2
-    EV≥9% → 1.5 (capped)
+    HARD GATE: EV <= 0 -> 0.0 (fixed from old 0.35 soft gate bug)
+    EV=0.001% -> 0.35, EV=1% -> 0.8, EV=3% -> 1.2, EV>=9% -> 1.5
 
     Args:
         ev: Expected value percentage
 
     Returns:
-        EV multiplier between 0.35 and 1.5
+        EV multiplier between 0.0 and 1.5
     """
-    if ev <= 0:
-        return 0.35
-
-    # Interpolation points: (ev, multiplier)
-    points = [
-        (0, 0.35),
-        (1, 0.8),
-        (3, 1.2),
-        (9, 1.5),
-    ]
-
-    # Cap at 9%
-    if ev >= 9:
-        return 1.5
-
-    # Find interpolation segment
-    for i in range(len(points) - 1):
-        ev_low, mult_low = points[i]
-        ev_high, mult_high = points[i + 1]
-
-        if ev_low <= ev <= ev_high:
-            # Linear interpolation
-            ratio = (ev - ev_low) / (ev_high - ev_low)
-            return mult_low + ratio * (mult_high - mult_low)
-
-    # Fallback (shouldn't reach here)
-    return 0.35
+    from Fast_Swarm.Metrics.fitness_model import ev_multiplier
+    return ev_multiplier(ev)
 
 
 # =============================================================================
@@ -342,13 +316,13 @@ def calculate_sortino(trades: list[TradeData]) -> float:
     """
     Calculate Sortino ratio from trades.
 
-    Sortino = (mean_return - risk_free) / downside_deviation
+    Delegates to QuantStats-backed metrics engine.
 
     Args:
         trades: List of trade data
 
     Returns:
-        Sortino ratio (0 if insufficient data or no downside)
+        Sortino ratio, bounded [0, 4].
     """
     if len(trades) < 2:
         return 0.0
@@ -358,52 +332,54 @@ def calculate_sortino(trades: list[TradeData]) -> float:
     if len(pnls) < 2:
         return 0.0
 
-    mean_return = sum(pnls) / len(pnls)
+    from Fast_Swarm.Metrics.metrics_engine import calculate_sortino as _engine_sortino
 
-    # Downside deviation (only negative returns)
-    negative_returns = [p for p in pnls if p < 0]
+    returns = [p / 100 for p in pnls]
+    raw = _engine_sortino(returns)
 
-    if not negative_returns:
-        # No losses = infinite Sortino, cap at 4
-        return 4.0
+    # Engine returns 0.0 when QuantStats gives inf (all positive, no downside)
+    if raw == 0.0:
+        mean_r = sum(returns) / len(returns)
+        if mean_r > 0 and not [r for r in returns if r < 0]:
+            return 4.0
 
-    sum_squared = sum(p**2 for p in negative_returns)
-    downside_dev = math.sqrt(sum_squared / len(pnls))
-
-    if downside_dev == 0:
-        return 4.0 if mean_return > 0 else 0.0
-
-    sortino = mean_return / downside_dev
-
-    # Bound to reasonable range
-    return max(0, min(4, sortino))
+    return max(0.0, min(4.0, raw))
 
 
 def calculate_max_drawdown(trades: list[TradeData]) -> float:
     """
-    Calculate maximum drawdown from trades.
+    Calculate maximum drawdown from trades with position sizing.
 
     Args:
         trades: List of trade data
 
     Returns:
         Maximum drawdown as a percentage (0-100)
+
+    Note:
+        Previously this function treated each trade's pnl_pct as if it were
+        the entire portfolio's return, ignoring position sizing. This caused
+        100% drawdown on agents with many trades. Now it correctly applies
+        position_size_pct to calculate the actual portfolio impact.
     """
     if not trades:
         return 0.0
 
-    pnls = [t.pnl_pct for t in trades if _is_valid_number(t.pnl_pct)]
-
-    if not pnls:
-        return 0.0
-
-    # Build equity curve
+    # Build equity curve with position sizing
     equity = 100.0  # Start at 100
     peak = equity
     max_dd = 0.0
 
-    for pnl_pct in pnls:
-        equity *= 1 + pnl_pct / 100
+    for t in trades:
+        if not _is_valid_number(t.pnl_pct):
+            continue
+
+        # Apply position sizing: portfolio impact = position_size * trade_pnl
+        # e.g., 10% position with -50% trade loss = -5% portfolio impact
+        position_pct = t.position_size_pct if hasattr(t, 'position_size_pct') else 1.0
+        equity_impact_pct = position_pct * t.pnl_pct
+        equity *= 1 + equity_impact_pct / 100
+
         peak = max(peak, equity)
         dd = (peak - equity) / peak * 100 if peak > 0 else 0
         max_dd = max(max_dd, dd)

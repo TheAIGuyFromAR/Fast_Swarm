@@ -4,6 +4,7 @@ Backtest Service for Fast_Swarm.
 Provides backtesting functionality for patterns and agents.
 """
 
+import logging
 import math
 import uuid
 from typing import Any
@@ -14,6 +15,10 @@ from ..Models.backtest_models import (
     ExitStrategy,
     TradeRecord,
 )
+from ...Validation.candle_gaps import warn_if_gaps
+from ...Validation.candle_sequence_validator import validate_candle_sequence
+
+logger = logging.getLogger(__name__)
 
 # =============================================================================
 # Trading Costs by Liquidity Tier
@@ -283,37 +288,22 @@ def _calculate_regime_fitness(metrics: dict[str, Any]) -> float:
 
 
 def _calculate_max_drawdown(pnls: list[float]) -> float:
-    """Calculate maximum drawdown from PnL series."""
+    """Calculate maximum drawdown from PnL series (percentages)."""
+    from Fast_Swarm.Metrics.metrics_engine import calculate_max_drawdown
     if not pnls:
         return 0.0
-
-    cumulative = 0.0
-    peak = 0.0
-    max_dd = 0.0
-
-    for pnl in pnls:
-        cumulative += pnl
-        if cumulative > peak:
-            peak = cumulative
-        dd = peak - cumulative
-        if dd > max_dd:
-            max_dd = dd
-
-    return max_dd
+    # Convert pnl percentages to return fractions for the engine
+    returns = [p / 100 for p in pnls]
+    return calculate_max_drawdown(returns) * 100  # Back to percentage
 
 
 def _calculate_sharpe(pnls: list[float]) -> float:
     """Calculate Sharpe ratio from PnL series."""
+    from Fast_Swarm.Metrics.metrics_engine import calculate_sharpe
     if len(pnls) < 2:
         return 0.0
-
-    mean_return = sum(pnls) / len(pnls)
-    variance = sum((p - mean_return) ** 2 for p in pnls) / len(pnls)
-    std_dev = variance**0.5 if variance > 0 else 0
-
-    sharpe = mean_return / std_dev if std_dev > 0 else 0
-    # Cap at ±6 to filter calculation anomalies while allowing exceptional strategies
-    return max(-6.0, min(6.0, sharpe))
+    returns = [p / 100 for p in pnls]
+    return calculate_sharpe(returns)
 
 
 # =============================================================================
@@ -408,6 +398,12 @@ def run_backtest(
     direction = pattern.get("direction", "long")
     asset = candles[0].get("asset", "BTC") if candles else "BTC"
 
+    # Validate candle sequence for gaps (log warning but continue)
+    timeframe = config.timeframe if config else "1m"
+    is_valid, gap_msg = validate_candle_sequence(candles, timeframe)
+    if not is_valid:
+        logger.warning(f"[Backtest] Data quality issue for {asset}: {gap_msg}")
+
     # Get trading costs
     if config.include_costs:
         costs_pct = get_trading_costs_pct(asset)
@@ -418,6 +414,7 @@ def run_backtest(
 
     trades = []
     open_trade: dict[str, Any] | None = None
+    pending_signal: dict[str, Any] | None = None  # Delayed entry (next-candle execution)
 
     # Skip warmup period
     start_idx = config.min_candles_warmup
@@ -432,10 +429,17 @@ def run_backtest(
             asset=asset,
         )
 
+    # Warn about data gaps (non-blocking)
+    warn_if_gaps(candles, config.timeframe)
+
     for i in range(start_idx, len(candles)):
         candle = candles[i]
-        close_price = candle.get("close", 0)
+        close_price = candle.get("close")
         timestamp = candle.get("timestamp", 0)
+
+        # Skip candles with invalid close prices (None, 0, or negative)
+        if close_price is None or close_price <= 0:
+            continue
 
         # Extract indicators from candle
         indicators = {k: v for k, v in candle.items() if isinstance(v, (int, float)) and not math.isnan(v)}
@@ -465,24 +469,41 @@ def run_backtest(
                 trades.append(trade)
                 open_trade = None
 
-        # If no open trade, check for entry
-        if open_trade is None:
-            matched, confidence = evaluate_conditions(entry_conditions, indicators)
-
-            if matched and confidence >= config.min_confidence:
+        # Execute pending signal at this candle's open (next-candle entry)
+        if pending_signal is not None and open_trade is None:
+            open_price = candle.get("open")
+            if open_price and open_price > 0:
+                # Apply slippage to entry
+                slippage = costs_breakdown.get("slippage_pct", 0) / 100
+                if pending_signal["direction"] == "long":
+                    entry_price = open_price * (1 + slippage)
+                else:
+                    entry_price = open_price * (1 - slippage)
                 open_trade = {
                     "trade_id": str(uuid.uuid4()),
                     "pattern_id": pattern_id,
                     "asset": asset,
                     "direction": direction,
-                    "entry_price": close_price,
+                    "entry_price": entry_price,
                     "entry_timestamp": timestamp,
-                    "entry_confidence": confidence,
+                    "entry_confidence": pending_signal["confidence"],
                     "candles_held": 0,
-                    "price_history": [close_price],
-                    "peak_price": close_price,
+                    "price_history": [entry_price],
+                    "peak_price": entry_price,
                     "trailing_stop_price": 0.0,
                     "breakeven_activated": False,
+                }
+            pending_signal = None
+
+        # If no open trade, check for entry signal (will execute on NEXT candle)
+        if open_trade is None and pending_signal is None:
+            matched, confidence = evaluate_conditions(entry_conditions, indicators)
+
+            if matched and confidence >= config.min_confidence:
+                pending_signal = {
+                    "direction": direction,
+                    "confidence": confidence,
+                    "signal_candle_idx": i,
                 }
 
     # Close any remaining open trade
@@ -490,7 +511,7 @@ def run_backtest(
         last_candle = candles[-1]
         trade = _close_trade(
             open_trade=open_trade,
-            exit_price=last_candle.get("close", 0),
+            exit_price=last_candle.get("close") or open_trade["entry_price"],
             exit_timestamp=last_candle.get("timestamp", 0),
             exit_reason="end_of_data",
             costs_breakdown=costs_breakdown,
@@ -638,10 +659,11 @@ def _close_trade(
         direction=direction,
     )
 
-    # Subtract costs
+    # Subtract costs (fees + slippage + spread)
     fees_pct = costs_breakdown.get("fee_pct", 0)
     slippage_pct = costs_breakdown.get("slippage_pct", 0)
-    net_pnl = gross_pnl - fees_pct - slippage_pct
+    spread_pct = costs_breakdown.get("spread_pct", 0)
+    net_pnl = gross_pnl - fees_pct - slippage_pct - spread_pct
 
     return TradeRecord(
         trade_id=open_trade["trade_id"],

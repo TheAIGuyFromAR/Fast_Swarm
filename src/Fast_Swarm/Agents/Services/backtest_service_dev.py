@@ -34,6 +34,8 @@ from Fast_Swarm.local_agents.core.state import AgentRecord
 from Fast_Swarm.local_agents.core.traits import AgentTraits
 from Fast_Swarm.local_agents.shared.llm_client import AIZoneMode
 
+from Fast_Swarm.Metrics.metrics_constants import REGIME_WEIGHTS as _REGIME_WEIGHTS
+
 from ...Trades.Services.trade_service import persist_trades
 from ..Models.agent_models import Agent
 from .fitness_service import TradeData, calculate_fitness
@@ -118,23 +120,8 @@ class AgentBacktestServiceDev:
         "1d": {"candles": 90},
     }
 
-    # Regime importance weights - harder conditions worth more in fitness
-    # MUST match backtest_service.py for consistency
-    REGIME_WEIGHTS = {
-        "random_1m": 1.0,
-        "random_5m": 1.0,
-        "random_15m": 1.0,
-        "random_1h": 1.0,
-        "random_4h": 1.0,
-        "random_1d": 1.0,
-        "bull": 0.5,  # Everyone can win in a bull market
-        "bear": 2.0,  # Harder to profit when prices fall
-        "crash": 3.0,  # Survival is critical - highest weight
-        "sideways": 2.5,  # Market spends most time here
-        "blowoff": 1.5,  # Volatility spike before reversal
-        "recovery": 1.5,  # Catching the bounce
-        "volatile": 2.0,  # High uncertainty
-    }
+    # Regime importance weights (centralized in metrics_constants.py)
+    REGIME_WEIGHTS = _REGIME_WEIGHTS
 
     def __init__(self):
         self.loader = OHLCVLoader()
@@ -388,7 +375,9 @@ class AgentBacktestServiceDev:
             # Persist trades
             if res.get("trades"):
                 try:
-                    await persist_trades(session, res["trades"], "evolution_backtest_dev", timeframe, fetch_indicators=True)
+                    await persist_trades(
+                        session, res["trades"], "evolution_backtest_dev", timeframe, fetch_indicators=True
+                    )
                 except Exception as e:
                     print(f"[BacktestDev] Trade persist error: {e}")
 
@@ -408,6 +397,7 @@ class AgentBacktestServiceDev:
             agent.annualized_roi_pct = metrics.get("annualized_roi_pct", 0)
             agent.win_rate = metrics.get("win_rate")
             agent.total_trades = metrics.get("total_trades", 0)
+            agent.winning_trades = metrics.get("winning_trades", 0)
             agent.fitness_by_regime = fitness_by_regime
             agent.backtest_count = (agent.backtest_count or 0) + 1
             agent.last_backtest_at = datetime.utcnow()
@@ -442,12 +432,15 @@ class AgentBacktestServiceDev:
             sharpe = (statistics.mean(returns) / std) if std > 0 else 0
             sharpe = max(-6, min(6, sharpe))
 
-        # Drawdown
+        # Drawdown (with position sizing)
         eq, peak, max_dd = 100.0, 100.0, 0.0
         for t in finite:
-            eq *= 1 + t.pnl_pct / 100
+            # Apply position sizing: portfolio impact = position_size * trade_pnl
+            position_pct = getattr(t, 'position_size_pct', 100.0) / 100
+            equity_impact = position_pct * t.pnl_pct
+            eq *= 1 + equity_impact / 100
             peak = max(peak, eq)
-            dd = ((peak - eq) / peak) * 100
+            dd = ((peak - eq) / peak) * 100 if peak > 0 else 0
             max_dd = max(max_dd, dd)
 
         # Fitness score using the proper 100-point model from fitness_service.py
@@ -461,6 +454,7 @@ class AgentBacktestServiceDev:
                     entry_price=getattr(t, "entry_price", 0.0) or 0.0,
                     exit_price=getattr(t, "exit_price", 0.0) or 0.0,
                     size=getattr(t, "size", 0.0) or 0.0,
+                    position_size_pct=getattr(t, "position_size_pct", 100.0) / 100,  # Convert to decimal
                 )
                 for t in finite
                 if t.pnl_pct is not None

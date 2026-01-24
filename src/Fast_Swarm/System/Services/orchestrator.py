@@ -86,19 +86,21 @@ class BacktestOrchestrator:
     AGENTS_PER_BATCH = 100  # Agents to test per window
     WINDOWS_PER_BATCH = 1  # Windows to load per batch (1 = test one at a time)
     WINDOWS_BEFORE_EVOLUTION = 50  # Test this many windows before evolution/discovery
-    PARALLEL_TESTS = 8  # Tuned for 128GB system with PostgreSQL memory fix
+    PARALLEL_TESTS = 1  # Sequential - one at a time to avoid enrichment race conditions
     COOLDOWN_SECONDS = 60  # Pause between cycles
     MAX_CONSECUTIVE_ERRORS = 3  # Stop after this many errors
 
     # Timeout settings (prevent freezing)
-    PATTERN_TIMEOUT_SECONDS = 30  # Max time per pattern test before skip
-    AGENT_TIMEOUT_SECONDS = 60  # Max time per agent test before skip
-    PHASE_WATCHDOG_SECONDS = 600  # 10 minutes - kill phase if no progress
+    # Increased to 600s to allow enrichment to complete (can take minutes for new symbols)
+    PATTERN_TIMEOUT_SECONDS = 600  # 10 minutes - enrichment can take a while
+    AGENT_TIMEOUT_SECONDS = 600  # 10 minutes per agent test
+    PHASE_WATCHDOG_SECONDS = 1200  # 20 minutes - kill phase if no progress
 
     def __init__(self):
         self.state = PipelineState()
         self._running = False
         self._task: asyncio.Task | None = None
+        self._skip_requested = False  # Flag for Taskmaster to skip stuck phase
 
         # Cached data (download once, use many times)
         self._current_windows: list = []
@@ -154,6 +156,27 @@ class BacktestOrchestrator:
 
         self.state.phase = PipelinePhase.IDLE
         print("[Orchestrator] Stopped")
+
+    async def restart(self):
+        """Restart the orchestrator (stop then start)."""
+        print("[Orchestrator] Restarting...")
+        await self.stop()
+        await asyncio.sleep(1)  # Brief pause
+        await self.start()
+        print("[Orchestrator] Restarted")
+
+    def skip_current_phase(self):
+        """Skip the current phase (used when stuck). Sets flag for pipeline to check."""
+        print(f"[Orchestrator] Skipping phase: {self.state.phase.value}")
+        self.state.last_error = f"Phase {self.state.phase.value} skipped by Taskmaster"
+        # Set a flag that the pipeline loop will check
+        self._skip_requested = True
+
+    def clear_error_state(self):
+        """Clear error state and reset consecutive error count."""
+        print("[Orchestrator] Clearing error state")
+        self.state.last_error = None
+        self.state.consecutive_errors = 0
 
     async def _run_pipeline(self):
         """Main pipeline loop - runs phases sequentially."""
@@ -222,7 +245,12 @@ class BacktestOrchestrator:
         print("[Orchestrator] Phase 1: Loading windows from pool...")
 
         from Fast_Swarm.local_agents.backtest.data import LazyCandleCache
-        from Fast_Swarm.local_agents.backtest.windows import get_pool_stats, get_windows, is_initialized
+        from Fast_Swarm.local_agents.backtest.windows import (
+            get_backtest_speed,
+            get_pool_stats,
+            get_windows,
+            is_initialized,
+        )
 
         # Check pool is initialized
         if not is_initialized():
@@ -230,7 +258,12 @@ class BacktestOrchestrator:
             self._current_windows = []
             return
 
-        # Get windows from pool
+        # Log speed mode
+        stats = get_pool_stats()
+        speed_mode = get_backtest_speed()
+        print(f"[Orchestrator] Speed mode: {speed_mode} (effective pool: {stats.get('effective_pool_size', 0)} windows)")
+
+        # Get windows from pool (filtered by speed mode)
         pool_windows = get_windows(count=self.WINDOWS_PER_BATCH)
 
         # Convert to dict format
@@ -252,8 +285,11 @@ class BacktestOrchestrator:
         if self._current_windows:
             self._preloaded_candles = LazyCandleCache(pool_windows)
 
-        stats = get_pool_stats()
-        print(f"[Orchestrator] Loaded {len(self._current_windows)} windows (candles load per-window on demand)")
+        # Show which timeframes are being used
+        tf_summary = ", ".join(f"{w['timeframe']}" for w in self._current_windows[:5])
+        if len(self._current_windows) > 5:
+            tf_summary += f"... (+{len(self._current_windows) - 5} more)"
+        print(f"[Orchestrator] Loaded {len(self._current_windows)} windows: {tf_summary}")
 
     async def _phase_test_patterns(self, session: AsyncSession):
         """Phase 2: Test patterns on current windows with watchdog protection."""
@@ -265,15 +301,43 @@ class BacktestOrchestrator:
 
         from Fast_Swarm.Patterns.Models.pattern_models import Pattern
 
-        # Get patterns that need testing (priority queue)
+        # Get patterns that need testing (priority queue, skip flagged-invalid)
+        from sqlalchemy import text as sa_text
+
         result = await session.execute(
             select(Pattern)
             .where(Pattern.is_active.is_(True))
             .where(Pattern.status != "archived")
+            .where(sa_text("(validation_issues IS NULL OR validation_issues->>'status' != 'invalid')"))
             .order_by(Pattern.priority.desc(), Pattern.last_backtest_at.asc().nullsfirst())
             .limit(self.PATTERNS_PER_BATCH)
         )
         patterns = result.scalars().all()
+
+        # Validate patterns that haven't been checked yet
+        from Fast_Swarm.local_agents.backtest.pattern_matcher import validate_pattern_conditions
+
+        validated_patterns = []
+        invalid_count = 0
+        for p in patterns:
+            if p.validation_issues is None:
+                # First time seeing this pattern - validate it
+                result_val = validate_pattern_conditions(p.entry_conditions or [])
+                if result_val["status"] == "invalid":
+                    p.validation_issues = result_val
+                    session.add(p)
+                    invalid_count += 1
+                    continue
+                else:
+                    p.validation_issues = result_val
+                    session.add(p)
+            validated_patterns.append(p)
+
+        if invalid_count > 0:
+            await session.commit()
+            print(f"[Orchestrator] Flagged {invalid_count} patterns with unresolvable indicators (skipped)")
+
+        patterns = validated_patterns
 
         self.state.patterns_total = len(patterns)
         self.state.patterns_tested = 0
@@ -296,23 +360,57 @@ class BacktestOrchestrator:
         watchdog_triggered = False
 
         async def test_one_pattern(pattern, idx: int):
-            """Test single pattern with timeout to prevent freezing."""
+            """Test single pattern with timeout that extends while enrichment progresses."""
             nonlocal zero_trade_count, tested_count, watchdog_triggered
             async with semaphore:
                 if not self._running or watchdog_triggered:
                     return {"status": "stopped"}
 
+                import time
+                from Fast_Swarm.local_agents.backtest.data import get_enrichment_last_progress
+
                 try:
-                    # Apply timeout to prevent hanging on any single pattern
-                    result = await asyncio.wait_for(
+                    # Use a loop with short timeouts - extend if enrichment is progressing
+                    task = asyncio.create_task(
                         service.test_pattern_on_windows(
                             session,
                             pattern,
                             self._current_windows,
                             preloaded_candles=self._preloaded_candles,
-                        ),
-                        timeout=self.PATTERN_TIMEOUT_SECONDS,
+                        )
                     )
+
+                    start_time = time.time()
+                    check_interval = 30  # Check every 30 seconds
+                    max_idle_time = self.PATTERN_TIMEOUT_SECONDS  # Timeout if no progress
+
+                    while not task.done():
+                        try:
+                            result = await asyncio.wait_for(
+                                asyncio.shield(task),
+                                timeout=check_interval,
+                            )
+                            # Task completed successfully
+                            break
+                        except asyncio.TimeoutError:
+                            # Check if enrichment made progress recently
+                            enrichment_progress = get_enrichment_last_progress()
+                            if enrichment_progress > start_time:
+                                # Enrichment is active - reset timeout
+                                self.state.last_progress_at = datetime.utcnow()
+                                elapsed = time.time() - enrichment_progress
+                                # Enrichment batches take 2-3 minutes each, allow 5 min grace
+                                if elapsed < 300:  # Progress in last 5 minutes
+                                    continue  # Keep waiting - enrichment is still active
+
+                            # No recent progress - check total elapsed
+                            total_elapsed = time.time() - start_time
+                            if total_elapsed > max_idle_time:
+                                task.cancel()
+                                raise asyncio.TimeoutError()
+                            # Otherwise keep waiting
+                    else:
+                        result = task.result()
 
                     tested_count += 1
                     self.state.patterns_tested = tested_count
@@ -328,7 +426,10 @@ class BacktestOrchestrator:
                 except asyncio.TimeoutError:
                     self.state.patterns_skipped_timeout += 1
                     self.state.last_progress_at = datetime.utcnow()  # Timeout is still progress
-                    print(f"[Orchestrator] TIMEOUT: Pattern {pattern.pattern_id[:8]} exceeded {self.PATTERN_TIMEOUT_SECONDS}s")
+                    # Get enrichment progress info for diagnostics
+                    enrichment_progress = get_enrichment_last_progress()
+                    last_enrich_ago = int(time.time() - enrichment_progress) if enrichment_progress > 0 else -1
+                    print(f"[Orchestrator] TIMEOUT: Pattern {pattern.pattern_id[:8]} exceeded {self.PATTERN_TIMEOUT_SECONDS}s (last enrichment: {last_enrich_ago}s ago)")
                     return {"status": "timeout"}
                 except Exception as e:
                     self.state.last_progress_at = datetime.utcnow()  # Error is still progress
@@ -348,7 +449,7 @@ class BacktestOrchestrator:
                         self.state.watchdog_killed_phase = True
                         print("")
                         print("=" * 70)
-                        print("🚨 CRITICAL: WATCHDOG TRIGGERED - PHASE KILLED 🚨")
+                        print("!!! CRITICAL: WATCHDOG TRIGGERED - PHASE KILLED !!!")
                         print(f"   No progress for {elapsed:.0f}s (limit: {self.PHASE_WATCHDOG_SECONDS}s)")
                         print(f"   Tested {tested_count}/{self.state.patterns_total} patterns before freeze")
                         print(f"   Phase: {self.state.phase.value}")
@@ -379,9 +480,9 @@ class BacktestOrchestrator:
         if timeouts > 0:
             summary += f" (timeouts={timeouts})"
         if watchdog_triggered:
-            summary += " ⚠️ WATCHDOG KILLED"
+            summary += " [WARN] WATCHDOG KILLED"
         if zero_pct > 50:
-            summary += f" ⚠️ {zero_pct:.0f}% had 0 trades - check indicator enrichment!"
+            summary += f" [WARN] {zero_pct:.0f}% had 0 trades - check indicator enrichment!"
         print(summary)
 
     async def _phase_test_agents(self, session: AsyncSession):

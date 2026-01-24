@@ -6,7 +6,16 @@ if sys.platform == "win32":
 
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
+    # Fix cp1252 encoding crashes for non-ASCII characters in output.
+    # Pattern data from DB may contain Greek letters (e.g., alpha) which
+    # are not encodable in cp1252. Replace un-encodable chars with '?' in output.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(errors="replace")
+
 import asyncio
+import logging
 import os
 from contextlib import asynccontextmanager
 from datetime import timedelta
@@ -79,10 +88,12 @@ from Fast_Swarm.Infrastructure.Services.backfill_service import startup_backfill
 from Fast_Swarm.local_agents.backtest.windows import initialize as init_window_pool
 from Fast_Swarm.local_agents.backtest.windows import refresh_and_extend as refresh_window_pool
 from Fast_Swarm.Patterns.Routers import pattern_router as patterns_router
-from Fast_Swarm.System.Routers import system_router
+from Fast_Swarm.System.Routers import system_router, taskmaster_router
 from Fast_Swarm.System.Services.orchestrator import get_orchestrator
+from Fast_Swarm.System.Services.taskmaster_service import get_taskmaster, ComponentStatus
 from Fast_Swarm.Tests.Router import router as test_runner_router
 from Fast_Swarm.Trades.Routers import trade_router as trades_router
+from Fast_Swarm.Trading.Routers import trading_router
 
 # =============================================================================
 # REMOVED: Separate concurrent loops (evolution_loop, pattern_discovery_loop,
@@ -140,6 +151,13 @@ async def window_pool_refresh_loop():
             await asyncio.sleep(3600)  # Retry in 1 hour
 
 
+    # paper_trading_loop() and get_latest_enriched_candle() removed.
+    # Paper trading is now tick-driven via:
+    #   data_collector.on_candle_close(paper_trading_service.handle_candle_close)
+    # which fires on every 1m/5m/15m/1h candle close from live WebSocket streams.
+    # The candle history buffer is maintained in-memory (no DB round-trips).
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 0. Ensure Docker and PostgreSQL are running
@@ -152,6 +170,15 @@ async def lifespan(app: FastAPI):
     # 1.1. Reset evolution global flag (prevents stuck flag after crash)
     reset_evolution_flag()
     print("[Startup] Evolution flag reset (prevents stuck flag after crash)")
+
+    # 1.2. Configure dedicated LLM response logger (separate from main app log)
+    os.makedirs("logs", exist_ok=True)
+    llm_log_handler = logging.FileHandler("logs/llm_responses.log")
+    llm_log_handler.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
+    llm_logger = logging.getLogger("llm_responses")
+    llm_logger.addHandler(llm_log_handler)
+    llm_logger.setLevel(logging.INFO)
+    print("[Startup] LLM response logger configured -> logs/llm_responses.log")
 
     # 1.5. Initialize window pool for backtesting (queries DB for data ranges)
     try:
@@ -196,16 +223,53 @@ async def lifespan(app: FastAPI):
     orchestrator = get_orchestrator()
     await orchestrator.start()
 
-    # 6. Start Window Pool Refresh Loop (daily at 3am, low impact)
+    # 6. Start Taskmaster (monitors system health, pokes stalled components)
+    print("[Startup] Starting Taskmaster monitoring...")
+    taskmaster = get_taskmaster()
+
+    # Register the orchestrator as a monitored component
+    def orchestrator_health_check():
+        """Health check function for the orchestrator."""
+        orch = get_orchestrator()
+        return {
+            "status": ComponentStatus.HEALTHY if orch._running else ComponentStatus.STALLED,
+            "last_active_at": orch.state.last_cycle_at,
+            "metadata": {
+                "current_phase": orch.state.phase.value,
+                "cycles_completed": orch.state.cycles_completed,
+                "is_running": orch._running,
+            }
+        }
+
+    taskmaster.register_component(
+        component_id="orchestrator",
+        name="Backtest Orchestrator",
+        health_check=orchestrator_health_check
+    )
+
+    await taskmaster.start_monitoring()
+
+    # 7. Start Window Pool Refresh Loop (daily at 3am, low impact)
     print("[Startup] Starting window pool refresh loop...")
     asyncio.create_task(window_pool_refresh_loop())
+
+    # 8. Pre-fill candle buffers from DB, then wire paper trading to live stream
+    print("[Startup] Pre-filling candle buffers from DB...")
+    await data_collector.prefill_buffers_from_db(symbols)
+
+    from Fast_Swarm.Trading.Services.agent_paper_trading_service import paper_trading_service
+    data_collector.on_candle_close(paper_trading_service.handle_candle_close)
+    print("[Startup] Paper trading wired to live candle stream (tick-driven)")
 
     yield
 
     # Shutdown logic
     print("Shutting down...")
 
-    # Stop orchestrator first (graceful shutdown of P2 operations)
+    # Stop taskmaster first (stops monitoring)
+    await taskmaster.stop_monitoring()
+
+    # Stop orchestrator (graceful shutdown of P2 operations)
     await orchestrator.stop()
 
     await stream_manager.stop()
@@ -244,12 +308,14 @@ app.include_router(evolution_router.router)
 app.include_router(actions_router.router)
 app.include_router(patterns_router.router)
 app.include_router(trades_router.router)
+app.include_router(trading_router.router)
 app.include_router(evolution_monitor_router.router)
 app.include_router(governance_router.router)
 app.include_router(market_data_router.router)
 app.include_router(exchanges_router.router)
 app.include_router(sentiment_router.router)
 app.include_router(system_router.router)
+app.include_router(taskmaster_router.router)
 app.include_router(test_runner_router.router)
 
 # Mount static files for dashboard

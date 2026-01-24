@@ -50,6 +50,32 @@ class StreamManagerService:
     def on_order_book(self, callback):
         self._callbacks["order_book"].append(callback)
 
+    # Callback removal methods to prevent memory leaks
+    def remove_trade_callback(self, callback):
+        """Remove a trade callback to prevent memory accumulation."""
+        if callback in self._callbacks["trade"]:
+            self._callbacks["trade"].remove(callback)
+
+    def remove_kline_callback(self, callback):
+        """Remove a kline callback to prevent memory accumulation."""
+        if callback in self._callbacks["kline"]:
+            self._callbacks["kline"].remove(callback)
+
+    def remove_ticker_callback(self, callback):
+        """Remove a ticker callback to prevent memory accumulation."""
+        if callback in self._callbacks["ticker"]:
+            self._callbacks["ticker"].remove(callback)
+
+    def remove_order_book_callback(self, callback):
+        """Remove an order book callback to prevent memory accumulation."""
+        if callback in self._callbacks["order_book"]:
+            self._callbacks["order_book"].remove(callback)
+
+    def clear_all_callbacks(self):
+        """Clear all callbacks - useful during shutdown."""
+        for key in self._callbacks:
+            self._callbacks[key].clear()
+
     async def start(self, symbols: dict[str, list[str]]):
         """
         Start all exchange streams.
@@ -85,6 +111,10 @@ class StreamManagerService:
 
         for task in self._tasks:
             task.cancel()
+
+        # Clear all callbacks to prevent memory leaks
+        self.clear_all_callbacks()
+        self._tasks.clear()
 
         logger.info("StreamManagerService stopped.")
 

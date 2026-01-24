@@ -185,7 +185,7 @@ class VLLMClient:
         """Compute hash for prefix caching."""
         return hashlib.sha256(text.encode()).hexdigest()[:16]
 
-    async def generate(
+    def _build_payload(
         self,
         prompt: str,
         system: str | None = None,
@@ -193,53 +193,15 @@ class VLLMClient:
         max_tokens: int = 500,
         json_mode: bool = False,
         prefix: str | None = None,
-    ) -> VLLMResponse:
-        """
-        Generate completion from vLLM.
-
-        Args:
-            prompt: User prompt.
-            system: Optional system prompt.
-            temperature: Sampling temperature (0-1).
-            max_tokens: Maximum tokens to generate.
-            json_mode: If True, expect JSON response.
-            prefix: Optional prefix for caching (reused across calls).
-
-        Returns:
-            VLLMResponse with content and parsed JSON if applicable.
-        """
-        start_time = time.time()
-
-        # Check server
-        if not self.is_available():
-            if self.auto_start:
-                if not self.start_server():
-                    return VLLMResponse(
-                        success=False,
-                        content="",
-                        error="vLLM server not available and failed to start",
-                        latency_ms=int((time.time() - start_time) * 1000),
-                        model=self.model,
-                    )
-            else:
-                return VLLMResponse(
-                    success=False,
-                    content="",
-                    error="vLLM server not available",
-                    latency_ms=int((time.time() - start_time) * 1000),
-                    model=self.model,
-                )
-
-        # Build messages for chat API
+    ) -> dict:
+        """Build request payload for vLLM (OpenAI-compatible chat format)."""
         messages = []
         if system:
             messages.append({"role": "system", "content": system})
 
-        # Combine prefix with prompt if provided (for caching)
         full_prompt = f"{prefix}\n\n{prompt}" if prefix else prompt
         messages.append({"role": "user", "content": full_prompt})
 
-        # Build request payload (OpenAI-compatible)
         payload = {
             "model": self.model,
             "messages": messages,
@@ -251,8 +213,18 @@ class VLLMClient:
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
 
-        # Try with retries
+        return payload
+
+    def _do_request(self, payload: dict, json_mode: bool = False) -> VLLMResponse:
+        """
+        Perform blocking HTTP request to vLLM (sync).
+
+        Extracted so it can be called directly (sync) or wrapped in
+        asyncio.to_thread (async).
+        """
+        start_time = time.time()
         last_error = None
+
         for attempt in range(self.max_retries):
             try:
                 req = urllib.request.Request(
@@ -265,18 +237,15 @@ class VLLMClient:
                 with urllib.request.urlopen(req, timeout=self.timeout) as response:  # nosec B310
                     result = json.loads(response.read().decode())
 
-                    # Extract response
                     choice = result.get("choices", [{}])[0]
                     content = choice.get("message", {}).get("content", "")
 
-                    # Get usage stats
                     usage = result.get("usage", {})
                     prompt_tokens = usage.get("prompt_tokens", 0)
                     completion_tokens = usage.get("completion_tokens", 0)
 
                     latency_ms = int((time.time() - start_time) * 1000)
 
-                    # Try to parse JSON if expected
                     parsed = None
                     if json_mode and content:
                         try:
@@ -301,9 +270,9 @@ class VLLMClient:
             except Exception as e:
                 last_error = str(e)
 
-            # Wait before retry (non-blocking)
+            # Blocking retry delay (OK — runs in thread or sync context)
             if attempt < self.max_retries - 1:
-                await asyncio.sleep(0.5 * (attempt + 1))
+                time.sleep(0.5 * (attempt + 1))
 
         latency_ms = int((time.time() - start_time) * 1000)
         return VLLMResponse(
@@ -313,6 +282,78 @@ class VLLMClient:
             latency_ms=latency_ms,
             model=self.model,
         )
+
+    def _ensure_server(self) -> str | None:
+        """Check server availability, auto-start if needed. Returns error string or None."""
+        if self.is_available():
+            return None
+        if self.auto_start:
+            if not self.start_server():
+                return "vLLM server not available and failed to start"
+            return None
+        return "vLLM server not available"
+
+    def generate_sync(
+        self,
+        prompt: str,
+        system: str | None = None,
+        temperature: float = 0.7,
+        max_tokens: int = 500,
+        json_mode: bool = False,
+        prefix: str | None = None,
+    ) -> VLLMResponse:
+        """
+        Generate completion synchronously (blocking).
+
+        Use from sync code (backtests running in ThreadPoolExecutor).
+        """
+        start_time = time.time()
+        err = self._ensure_server()
+        if err:
+            return VLLMResponse(
+                success=False, content="", error=err,
+                latency_ms=int((time.time() - start_time) * 1000),
+                model=self.model,
+            )
+        payload = self._build_payload(prompt, system, temperature, max_tokens, json_mode, prefix)
+        return self._do_request(payload, json_mode=json_mode)
+
+    async def generate(
+        self,
+        prompt: str,
+        system: str | None = None,
+        temperature: float = 0.7,
+        max_tokens: int = 500,
+        json_mode: bool = False,
+        prefix: str | None = None,
+    ) -> VLLMResponse:
+        """
+        Generate completion asynchronously (non-blocking).
+
+        Wraps blocking urllib I/O in asyncio.to_thread so the event loop
+        is not blocked.
+
+        Args:
+            prompt: User prompt.
+            system: Optional system prompt.
+            temperature: Sampling temperature (0-1).
+            max_tokens: Maximum tokens to generate.
+            json_mode: If True, expect JSON response.
+            prefix: Optional prefix for caching (reused across calls).
+
+        Returns:
+            VLLMResponse with content and parsed JSON if applicable.
+        """
+        start_time = time.time()
+        err = self._ensure_server()
+        if err:
+            return VLLMResponse(
+                success=False, content="", error=err,
+                latency_ms=int((time.time() - start_time) * 1000),
+                model=self.model,
+            )
+        payload = self._build_payload(prompt, system, temperature, max_tokens, json_mode, prefix)
+        return await asyncio.to_thread(self._do_request, payload, json_mode)
 
     def _extract_json(self, text: str) -> dict | None:
         """Try to extract JSON from text content."""
@@ -363,7 +404,7 @@ class VLLMClient:
         """
         responses = []
         for prompt in prompts:
-            response = self.generate(
+            response = self.generate_sync(
                 prompt=prompt,
                 system=system,
                 temperature=temperature,
@@ -514,8 +555,8 @@ class VLLMAIZoneHandler:
             recent_trades=recent_trades,
         )
 
-        # Call vLLM
-        response = self.client.generate(
+        # Call vLLM (sync — backtests run in ThreadPoolExecutor, no event loop)
+        response = self.client.generate_sync(
             prompt=prompt,
             system=AI_ZONE_SYSTEM_PROMPT,
             temperature=0.3,  # Lower for more consistent decisions

@@ -25,6 +25,8 @@ from Fast_Swarm.local_agents.core.state import AgentRecord
 from Fast_Swarm.local_agents.core.traits import AgentTraits
 from Fast_Swarm.local_agents.shared.llm_client import AIZoneMode
 
+from Fast_Swarm.Metrics.metrics_constants import REGIME_WEIGHTS as _REGIME_WEIGHTS
+
 from ...Trades.Services.trade_service import persist_trades
 from ..Models.agent_models import Agent
 from .fitness_service import TradeData, calculate_fitness
@@ -37,27 +39,8 @@ class AgentBacktestService:
     WINDOWS_PER_BACKTEST = 50  # Select ~50 windows from pool per backtest run
     CANONICAL_WINDOWS_PER_REGIME = 4  # Max canonical windows per regime type
 
-    # Regime importance weights for weighted fitness calculation
-    # Higher weights = harder market conditions worth more in fitness
-    REGIME_WEIGHTS = {
-        # Random windows (baseline difficulty)
-        "random_1m": 1.0,
-        "random_5m": 1.0,
-        "random_15m": 1.0,
-        "random_1h": 1.0,
-        "random_4h": 1.0,
-        "random_1d": 1.0,
-        # Canonical periods (varying difficulty)
-        "bull": 0.5,  # Everyone can win in a bull market
-        "bear": 2.0,  # Harder to profit when prices fall
-        "crash": 3.0,  # Survival is critical - highest weight
-        "sideways": 2.5,  # Market spends most time here, hard to profit
-        "blowoff": 1.5,  # Volatility spike before reversal
-        "recovery": 1.5,  # Catching the bounce
-        "volatile": 2.0,  # High uncertainty
-        "winter": 2.0,  # Extended bear
-        "transition": 1.5,  # Regime change
-    }
+    # Regime importance weights (centralized in metrics_constants.py)
+    REGIME_WEIGHTS = _REGIME_WEIGHTS
 
     # Timeframes to test with window sizes (candles per window)
     TIMEFRAME_CONFIG = {
@@ -121,6 +104,7 @@ class AgentBacktestService:
         if agent_id:
             try:
                 from sqlalchemy import text
+
                 result = await session.execute(
                     text("""
                         SELECT symbol || '_' || timeframe || '_' ||
@@ -129,7 +113,7 @@ class AgentBacktestService:
                         WHERE agent_id = :agent_id
                         GROUP BY symbol, timeframe, entry_timestamp
                     """),
-                    {"agent_id": agent_id}
+                    {"agent_id": agent_id},
                 )
                 tested_window_keys = {row[0] for row in result.fetchall()}
             except Exception as e:
@@ -145,20 +129,24 @@ class AgentBacktestService:
             if window_key in tested_window_keys:
                 continue
 
-            windows.append({
-                "asset": w.symbol,
-                "timeframe": w.timeframe,
-                "start_ts": w.start_ts,
-                "end_ts": w.end_ts,
-                "regime": f"random_{w.timeframe}",
-            })
+            windows.append(
+                {
+                    "asset": w.symbol,
+                    "timeframe": w.timeframe,
+                    "start_ts": w.start_ts,
+                    "end_ts": w.end_ts,
+                    "regime": f"random_{w.timeframe}",
+                }
+            )
 
             if len(windows) >= count:
                 break
 
         stats = get_pool_stats()
         skipped = len(tested_window_keys) if tested_window_keys else 0
-        print(f"[Backtest] Selected {len(windows)} windows from pool of {stats['pool_size']} (skipped {skipped} already tested)")
+        print(
+            f"[Backtest] Selected {len(windows)} windows from pool of {stats['pool_size']} (skipped {skipped} already tested)"
+        )
 
         return windows
 
@@ -209,18 +197,22 @@ class AgentBacktestService:
                     continue
                 regime_counts[regime] = regime_counts.get(regime, 0) + 1
 
-                all_windows.append({
-                    "asset": period["asset"],
-                    "timeframe": period["timeframe"],
-                    "start_ts": period["start_ts"],
-                    "end_ts": period["end_ts"],
-                    "regime": regime,
-                    "period_name": period["name"],
-                    "description": period.get("description", ""),
-                })
+                all_windows.append(
+                    {
+                        "asset": period["asset"],
+                        "timeframe": period["timeframe"],
+                        "start_ts": period["start_ts"],
+                        "end_ts": period["end_ts"],
+                        "regime": regime,
+                        "period_name": period["name"],
+                        "description": period.get("description", ""),
+                    }
+                )
 
             canonical_added = sum(regime_counts.values())
-            print(f"[Backtest] Added {canonical_added} canonical periods (max {self.CANONICAL_WINDOWS_PER_REGIME}/regime)")
+            print(
+                f"[Backtest] Added {canonical_added} canonical periods (max {self.CANONICAL_WINDOWS_PER_REGIME}/regime)"
+            )
 
         # Summary
         regime_counts = {}
@@ -321,7 +313,7 @@ class AgentBacktestService:
                         if isinstance(p, str):
                             reference_ids.append(p)
                         elif isinstance(p, dict):
-                            if p.get("entry_conditions") and p.get("exit_conditions"):
+                            if p.get("entry_conditions"):
                                 agent_patterns.append(p)
                             else:
                                 pid = p.get("pattern_id", p.get("id", ""))
@@ -334,9 +326,7 @@ class AgentBacktestService:
 
                 # Hydrate reference IDs (only query what we need)
                 if reference_ids:
-                    pattern_result = await session.exec(
-                        select(Pattern).where(Pattern.pattern_id.in_(reference_ids))
-                    )
+                    pattern_result = await session.exec(select(Pattern).where(Pattern.pattern_id.in_(reference_ids)))
                     fetched_patterns = pattern_result.all()
 
                     for p in fetched_patterns:
@@ -435,6 +425,9 @@ class AgentBacktestService:
                                 "trades": len(window_trades),
                                 "fitness": w_metrics.get("fitness_score", 0.0),
                                 "sharpe": w_metrics.get("sharpe_ratio"),
+                                "sortino": w_metrics.get("sortino_ratio"),
+                                "calmar": w_metrics.get("calmar_ratio"),
+                                "max_drawdown": w_metrics.get("max_drawdown_pct", 0.0),
                                 "win_rate": w_metrics.get("win_rate"),
                                 "roi": w_metrics.get("annualized_roi_pct", 0.0),
                                 "pnl": w_metrics.get("total_pnl", 0.0),
@@ -454,6 +447,9 @@ class AgentBacktestService:
                             "trades": len(all_trades),
                             "fitness": w_metrics.get("fitness_score", 0.0),
                             "sharpe": w_metrics.get("sharpe_ratio"),
+                            "sortino": w_metrics.get("sortino_ratio"),
+                            "calmar": w_metrics.get("calmar_ratio"),
+                            "max_drawdown": w_metrics.get("max_drawdown_pct", 0.0),
                             "win_rate": w_metrics.get("win_rate"),
                             "roi": w_metrics.get("annualized_roi_pct", 0.0),
                             "pnl": w_metrics.get("total_pnl", 0.0),
@@ -505,47 +501,73 @@ class AgentBacktestService:
                 valid_windows = [w for w in window_metrics if w["trades"] > 0]
                 if valid_windows:
                     total_w = sum(w["trades"] for w in valid_windows)
-                    avg_fitness = sum(w["fitness"] * w["trades"] for w in valid_windows) / total_w
-                    avg_win_rate = sum((w["win_rate"] or 0) * w["trades"] for w in valid_windows) / total_w
+                    if total_w > 0:
+                        avg_fitness = sum(w["fitness"] * w["trades"] for w in valid_windows) / total_w
+                        avg_win_rate = sum((w["win_rate"] or 0) * w["trades"] for w in valid_windows) / total_w
+                    else:
+                        # All windows had 0 trades - use simple averages
+                        avg_fitness = sum(w["fitness"] for w in valid_windows) / len(valid_windows)
+                        avg_win_rate = sum((w["win_rate"] or 0) for w in valid_windows) / len(valid_windows)
                     # Sharpe: average across windows (each window is independent experiment)
-                    sharpe_windows = [w for w in valid_windows if w["sharpe"] is not None]
+                    sharpe_windows = [w for w in valid_windows if w.get("sharpe") is not None]
                     avg_sharpe = (
                         sum(w["sharpe"] for w in sharpe_windows) / len(sharpe_windows) if sharpe_windows else None
                     )
-                    avg_roi = sum(w["roi"] * w["trades"] for w in valid_windows) / total_w
+                    # Sortino: average across windows
+                    sortino_windows = [w for w in valid_windows if w.get("sortino") is not None]
+                    avg_sortino = (
+                        sum(w["sortino"] for w in sortino_windows) / len(sortino_windows) if sortino_windows else None
+                    )
+                    # Calmar: average across windows
+                    calmar_windows = [w for w in valid_windows if w.get("calmar") is not None]
+                    avg_calmar = (
+                        sum(w["calmar"] for w in calmar_windows) / len(calmar_windows) if calmar_windows else None
+                    )
+                    # Max drawdown: take worst (highest) across all windows
+                    max_dd = max((w.get("max_drawdown") or 0) for w in valid_windows)
+                    avg_roi = sum(w["roi"] * w["trades"] for w in valid_windows) / total_w if total_w > 0 else 0.0
                 else:
                     avg_fitness = 0.0
                     avg_win_rate = None
                     avg_sharpe = None
+                    avg_sortino = None
+                    avg_calmar = None
+                    max_dd = 0.0
                     avg_roi = 0.0
 
                 metrics = {
                     "total_trades": total_trades,
                     "fitness_score": avg_fitness,
                     "sharpe_ratio": avg_sharpe,
+                    "sortino_ratio": avg_sortino,
+                    "calmar_ratio": avg_calmar,
+                    "max_drawdown_pct": max_dd,
                     "win_rate": avg_win_rate,
                     "annualized_roi_pct": avg_roi,
                     "total_pnl": total_pnl,
-                    # Note: sortino/calmar/max_drawdown require trade-level data, computed below if needed
-                    "sortino_ratio": None,
-                    "calmar_ratio": None,
-                    "max_drawdown_pct": 0.0,
                 }
 
                 # AGGREGATE by regime: group window metrics, average
+                # NOW INCLUDES: sortino, calmar, max_drawdown per regime
                 fitness_by_regime = {}
-                unique_regimes = set(w["regime"] for w in window_metrics)
+                unique_regimes = {w["regime"] for w in window_metrics}
                 for regime in unique_regimes:
                     regime_windows = [w for w in window_metrics if w["regime"] == regime and w["trades"] > 0]
                     regime_trades = sum(w["trades"] for w in regime_windows)
                     if regime_trades >= 5:  # Minimum for statistical significance
-                        regime_total = sum(w["trades"] for w in regime_windows)
+                        # Compute averages for ratio metrics (guarded division)
+                        sharpe_wins = [w for w in regime_windows if w.get("sharpe") is not None]
+                        sortino_wins = [w for w in regime_windows if w.get("sortino") is not None]
+                        calmar_wins = [w for w in regime_windows if w.get("calmar") is not None]
                         fitness_by_regime[regime] = {
-                            "fitness": sum(w["fitness"] * w["trades"] for w in regime_windows) / regime_total,
+                            "fitness": sum(w["fitness"] * w["trades"] for w in regime_windows) / regime_trades if regime_trades > 0 else 0.0,
                             "trades": regime_trades,
-                            "win_rate": sum((w["win_rate"] or 0) * w["trades"] for w in regime_windows) / regime_total,
-                            "sharpe": sum(w["sharpe"] or 0 for w in regime_windows) / len(regime_windows),
-                            "roi": sum(w["roi"] * w["trades"] for w in regime_windows) / regime_total,
+                            "win_rate": sum((w["win_rate"] or 0) * w["trades"] for w in regime_windows) / regime_trades if regime_trades > 0 else 0.0,
+                            "sharpe": sum(w["sharpe"] for w in sharpe_wins) / len(sharpe_wins) if sharpe_wins else None,
+                            "sortino": sum(w["sortino"] for w in sortino_wins) / len(sortino_wins) if sortino_wins else None,
+                            "calmar": sum(w["calmar"] for w in calmar_wins) / len(calmar_wins) if calmar_wins else None,
+                            "max_drawdown": max((w.get("max_drawdown") or 0) for w in regime_windows),
+                            "roi": sum(w["roi"] * w["trades"] for w in regime_windows) / regime_trades if regime_trades > 0 else 0.0,
                         }
 
                 if fitness_by_regime:
@@ -571,15 +593,15 @@ class AgentBacktestService:
                 fitness_matrix = {}
                 for regime in unique_regimes:
                     regime_windows = [w for w in window_metrics if w["regime"] == regime]
-                    unique_tfs = set(w["timeframe"] for w in regime_windows)
+                    unique_tfs = {w["timeframe"] for w in regime_windows}
                     fitness_matrix[regime] = {}
                     for tf in unique_tfs:
                         tf_windows = [w for w in regime_windows if w["timeframe"] == tf and w["trades"] > 0]
                         tf_trades = sum(w["trades"] for w in tf_windows)
                         if tf_trades >= 3:  # Lower threshold for matrix cells
-                            tf_total = sum(w["trades"] for w in tf_windows)
+                            # Division guarded by tf_trades > 0 check
                             fitness_matrix[regime][tf] = round(
-                                sum(w["fitness"] * w["trades"] for w in tf_windows) / tf_total, 1
+                                sum(w["fitness"] * w["trades"] for w in tf_windows) / tf_trades if tf_trades > 0 else 0.0, 1
                             )
 
                 # Update agent in DB
@@ -591,6 +613,7 @@ class AgentBacktestService:
                 agent.annualized_roi_pct = metrics.get("annualized_roi_pct", 0.0)
                 agent.win_rate = metrics.get("win_rate")
                 agent.total_trades = metrics.get("total_trades", 0)
+                agent.winning_trades = metrics.get("winning_trades", 0)
                 agent.total_pnl = metrics.get("total_pnl", 0.0)
                 agent.fitness_by_regime = fitness_by_regime  # Store per-regime breakdown
                 agent.fitness_matrix = fitness_matrix  # Store 2D matrix for heatmap
@@ -663,23 +686,30 @@ class AgentBacktestService:
         else:
             sharpe = None
 
-        # Sortino ratio (downside deviation)
-        downside_returns = [r for r in returns if r < 0]
-        if len(downside_returns) > 1:
-            downside_std = statistics.stdev(downside_returns)
-            sortino = (avg_pnl / downside_std) if downside_std > 0 else 0
+        # Sortino ratio (correct downside deviation formula)
+        # Uses root mean squared downside deviation across ALL returns, not just negative ones
+        target_return = 0  # Risk-free rate (0 for crypto)
+        if len(returns) > 1:
+            squared_downside = [min(0, r - target_return) ** 2 for r in returns]
+            downside_deviation = math.sqrt(sum(squared_downside) / len(returns))
+            sortino = ((avg_pnl - target_return) / downside_deviation) if downside_deviation > 0 else 0
+            # Cap at ±6 like Sharpe
+            sortino = max(-6.0, min(6.0, sortino))
         else:
             sortino = None
 
-        # Max drawdown (simplified - running equity curve)
+        # Max drawdown (with position sizing)
         equity = 100.0
         peak = equity
         max_dd = 0.0
         for trade in finite_trades:
-            equity *= 1 + trade.pnl_pct / 100
+            # Apply position sizing: portfolio impact = position_size * trade_pnl
+            position_pct = getattr(trade, 'position_size_pct', 100.0) / 100  # Convert to decimal
+            equity_impact = position_pct * trade.pnl_pct
+            equity *= 1 + equity_impact / 100
             if equity > peak:
                 peak = equity
-            dd = ((peak - equity) / peak) * 100
+            dd = ((peak - equity) / peak) * 100 if peak > 0 else 0
             if dd > max_dd:
                 max_dd = dd
 
@@ -698,6 +728,7 @@ class AgentBacktestService:
                     entry_price=getattr(t, "entry_price", 0.0) or 0.0,
                     exit_price=getattr(t, "exit_price", 0.0) or 0.0,
                     size=getattr(t, "size", 0.0) or 0.0,
+                    position_size_pct=getattr(t, "position_size_pct", 100.0) / 100,  # Convert to decimal
                 )
                 for t in finite_trades
                 if t.pnl_pct is not None
@@ -814,7 +845,7 @@ class AgentBacktestService:
                 if isinstance(p, str):
                     reference_ids.append(p)
                 elif isinstance(p, dict):
-                    if p.get("entry_conditions") and p.get("exit_conditions"):
+                    if p.get("entry_conditions"):
                         agent_patterns.append(p)
                     else:
                         # Dict but missing conditions - treat as reference
@@ -828,9 +859,7 @@ class AgentBacktestService:
 
         # Second pass: hydrate reference IDs (only query what we need)
         if reference_ids:
-            pattern_result = await session.exec(
-                select(Pattern).where(Pattern.pattern_id.in_(reference_ids))
-            )
+            pattern_result = await session.exec(select(Pattern).where(Pattern.pattern_id.in_(reference_ids)))
             fetched_patterns = pattern_result.all()
 
             for p in fetched_patterns:
@@ -856,6 +885,7 @@ class AgentBacktestService:
         traits_dict = agent.traits if isinstance(agent.traits, dict) else agent.traits.__dict__
 
         from dataclasses import fields as dataclass_fields
+
         known_fields = {f.name for f in dataclass_fields(AgentTraits)}
         filtered_traits = {k: v for k, v in traits_dict.items() if k in known_fields}
 
@@ -905,28 +935,32 @@ class AgentBacktestService:
             regime = "random" if raw_regime.startswith("random_") else raw_regime
 
             w_metrics = self._calculate_metrics(window_trades)
-            window_metrics.append({
-                "regime": regime,
-                "timeframe": window_tf,
-                "trades": len(window_trades),
-                "fitness": w_metrics.get("fitness_score", 0.0),
-                "sortino": w_metrics.get("sortino_ratio"),
-                "win_rate": w_metrics.get("win_rate"),
-                "roi": w_metrics.get("annualized_roi_pct", 0.0),
-                "pnl": w_metrics.get("total_pnl", 0.0),
-            })
+            window_metrics.append(
+                {
+                    "regime": regime,
+                    "timeframe": window_tf,
+                    "trades": len(window_trades),
+                    "fitness": w_metrics.get("fitness_score", 0.0),
+                    "sortino": w_metrics.get("sortino_ratio"),
+                    "win_rate": w_metrics.get("win_rate"),
+                    "roi": w_metrics.get("annualized_roi_pct", 0.0),
+                    "pnl": w_metrics.get("total_pnl", 0.0),
+                }
+            )
 
         agent_elapsed = time.time() - agent_start
 
         # Aggregate metrics
         total_trades = sum(w["trades"] for w in window_metrics)
         total_pnl = sum(w["pnl"] for w in window_metrics)
+        total_winning_trades = sum(1 for t in all_trades if t.pnl_pct > 0)
 
         valid_windows = [w for w in window_metrics if w["trades"] > 0]
         if valid_windows:
             total_w = sum(w["trades"] for w in valid_windows)
-            avg_fitness = sum(w["fitness"] * w["trades"] for w in valid_windows) / total_w
-            avg_win_rate = sum((w["win_rate"] or 0) * w["trades"] for w in valid_windows) / total_w
+            # Division safety: guard even though valid_windows filter ensures trades > 0
+            avg_fitness = sum(w["fitness"] * w["trades"] for w in valid_windows) / total_w if total_w > 0 else 0.0
+            avg_win_rate = sum((w["win_rate"] or 0) * w["trades"] for w in valid_windows) / total_w if total_w > 0 else None
             sortino_windows = [w for w in valid_windows if w["sortino"] is not None]
             avg_sortino = sum(w["sortino"] for w in sortino_windows) / len(sortino_windows) if sortino_windows else None
         else:
@@ -937,10 +971,12 @@ class AgentBacktestService:
         # Update agent in DB (agent is already tracked, no need to add)
         # Convert to proper types to avoid Decimal + float errors
         from decimal import Decimal
+
         agent.fitness_score = float(avg_fitness) if avg_fitness else 0.0
         agent.sortino_ratio = float(avg_sortino) if avg_sortino else None
         agent.win_rate = float(avg_win_rate) if avg_win_rate else None
         agent.total_trades = int(agent.total_trades or 0) + int(total_trades)
+        agent.winning_trades = int(agent.winning_trades or 0) + int(total_winning_trades)
         agent.total_pnl = Decimal(str(float(agent.total_pnl or 0) + float(total_pnl)))
         agent.backtest_count = int(agent.backtest_count or 0) + 1
         agent.last_backtest_at = datetime.utcnow()
@@ -966,11 +1002,14 @@ class AgentBacktestService:
                     for t in all_trades
                 ]
                 # Use dominant regime from window metrics
-                dominant_regime = max(window_metrics, key=lambda w: w["trades"])["regime"] if window_metrics else "random"
+                dominant_regime = (
+                    max(window_metrics, key=lambda w: w["trades"])["regime"] if window_metrics else "random"
+                )
                 dominant_tf = max(window_metrics, key=lambda w: w["trades"])["timeframe"] if window_metrics else "1h"
 
-                # Use no_autoflush context to prevent session.add() during flush warnings
-                async with session.no_autoflush:
+                # Disable autoflush to prevent session.add() during flush warnings
+                session.sync_session.autoflush = False
+                try:
                     await create_memories_from_trades(
                         session=session,
                         agent_id=aid,
@@ -985,10 +1024,14 @@ class AgentBacktestService:
                         agent_id=aid,
                         backtest_count=agent.backtest_count,
                     )
+                finally:
+                    session.sync_session.autoflush = True
             except Exception as e:
                 print(f"[AgentTest] Memory creation failed for {aid[:8]}: {e}")
 
-        print(f"[AgentTest] {aid[:8]}: fitness={avg_fitness:.1f}, trades={total_trades}, windows={len(windows)} ({agent_elapsed:.1f}s)")
+        print(
+            f"[AgentTest] {aid[:8]}: fitness={avg_fitness:.1f}, trades={total_trades}, windows={len(windows)} ({agent_elapsed:.1f}s)"
+        )
 
         return {
             "agent_id": aid,

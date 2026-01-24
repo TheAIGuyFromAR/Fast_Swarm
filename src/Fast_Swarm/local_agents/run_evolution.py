@@ -59,9 +59,9 @@ class EvolutionRunConfig:
 
     # AI Zone Mode for backtest decisions
     # SKIP: Fast backtesting, AI_REFLECT zone treated as skip
-    # HEURISTIC: Use entry_aggression trait for AI zone decisions
     # LLM: Real Ollama calls for AI zone decisions (slower but smarter)
-    ai_zone_mode: str = "heuristic"  # "skip", "heuristic", or "llm"
+    # VLLM: vLLM with prefix caching (default, GPU-optimized)
+    ai_zone_mode: str = "vllm"  # "skip", "llm", "vllm", or "unified"
 
     # Trait seeding from learnings
     seed_from_winners: bool = True  # Bias traits toward winning profiles

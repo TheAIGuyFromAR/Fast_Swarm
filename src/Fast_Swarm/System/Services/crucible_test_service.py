@@ -113,22 +113,30 @@ class CrucibleTestService:
             session.add(entry)
             await session.commit()
 
-            # 7. WISDOM GENERATION: Extract wisdom from successful Crucible completion
+            # 7. WISDOM GENERATION: Only extract wisdom from PASSING Crucible tests
+            # Agents must score above minimum to contribute wisdom (prevents noise)
+            MIN_WISDOM_FITNESS = 30.0  # ~0.5 sharpe, ~45% WR, positive ROI
             wisdom_id = None
-            try:
-                from .wisdom_service import WisdomTransferService
+            if entry.overall_fitness >= MIN_WISDOM_FITNESS:
+                try:
+                    from .wisdom_service import WisdomTransferService
 
-                wisdom_service = WisdomTransferService()
-                wisdom = await wisdom_service.generate_wisdom_from_entry(
-                    session=session,
-                    entry_id=entry_id,
-                    use_llm=True,  # Use LLM if available, fall back to heuristic
+                    wisdom_service = WisdomTransferService()
+                    wisdom = await wisdom_service.generate_wisdom_from_entry(
+                        session=session,
+                        entry_id=entry_id,
+                        use_llm=True,  # Use LLM if available, fall back to heuristic
+                    )
+                    if wisdom:
+                        wisdom_id = wisdom.id
+                        print(f"[Crucible] Generated wisdom {wisdom_id} from entry {entry_id}")
+                except Exception as e:
+                    print(f"[Crucible] Wisdom generation failed for entry {entry_id}: {e}")
+            else:
+                print(
+                    f"[Crucible] Entry {entry_id} below wisdom threshold "
+                    f"({entry.overall_fitness:.1f} < {MIN_WISDOM_FITNESS}), skipping wisdom"
                 )
-                if wisdom:
-                    wisdom_id = wisdom.id
-                    print(f"[Crucible] Generated wisdom {wisdom_id} from entry {entry_id}")
-            except Exception as e:
-                print(f"[Crucible] Wisdom generation failed for entry {entry_id}: {e}")
 
             return {
                 "entry_id": entry_id,

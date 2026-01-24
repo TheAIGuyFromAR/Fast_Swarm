@@ -21,6 +21,11 @@ load_dotenv()
 # Default to local postgres if not set (matching docker-compose.yml)
 POSTGRES_USER = os.getenv("POSTGRES_USER", "coinswarm")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "coinswarm_dev_2024")
+if os.getenv("POSTGRES_PASSWORD") is None:
+    import logging as _log
+    _log.getLogger(__name__).warning(
+        "POSTGRES_PASSWORD not set - using dev default. Set env var for production."
+    )
 POSTGRES_DB = os.getenv("POSTGRES_DB", "coinswarm")
 POSTGRES_HOST = os.getenv("POSTGRES_HOST", "localhost")
 POSTGRES_PORT = os.getenv("POSTGRES_PORT", "5432")
@@ -54,11 +59,11 @@ def get_async_engine():
             DATABASE_URL,
             echo=False,
             future=True,
-            pool_size=20,
-            max_overflow=30,
+            pool_size=50,
+            max_overflow=100,
             pool_pre_ping=True,
             pool_recycle=3600,
-            pool_timeout=10,
+            pool_timeout=30,
         )
     return _engine
 
@@ -263,6 +268,21 @@ async def _run_migrations(conn):
             ) THEN
                 ALTER TABLE patterns ADD COLUMN is_active BOOLEAN DEFAULT TRUE;
                 CREATE INDEX IF NOT EXISTS ix_patterns_is_active ON patterns(is_active);
+            END IF;
+        END $$;
+    """)
+    )
+
+    # Migration: Add validation_issues JSONB column to patterns table
+    await conn.execute(
+        text("""
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'patterns' AND column_name = 'validation_issues'
+            ) THEN
+                ALTER TABLE patterns ADD COLUMN validation_issues JSONB DEFAULT NULL;
             END IF;
         END $$;
     """)

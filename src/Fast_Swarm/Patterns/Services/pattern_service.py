@@ -77,14 +77,16 @@ def validate_tier(tier: int) -> tuple[bool, str]:
 
 def validate_conditions(conditions: list[dict]) -> tuple[bool, str]:
     """
-    Validate condition structure.
+    Validate condition structure and indicator resolvability.
 
-    Each condition must have 'indicator' and optionally 'min'/'max'.
+    Uses the full INDICATOR_ALIASES registry from pattern_matcher
+    (200+ entries) instead of the tiny INDICATORS list (24 entries).
+    Each condition must have 'indicator' that resolves to a canonical name.
     """
     if not isinstance(conditions, list):
         return False, "Conditions must be a list"
 
-    from .pattern_matching_service import INDICATORS
+    from Fast_Swarm.local_agents.backtest.pattern_matcher import resolve_indicator_name
 
     for i, cond in enumerate(conditions):
         if not isinstance(cond, dict):
@@ -94,7 +96,9 @@ def validate_conditions(conditions: list[dict]) -> tuple[bool, str]:
         if not indicator:
             return False, f"Condition {i} missing 'indicator'"
 
-        if indicator not in INDICATORS:
+        # Use full alias resolution instead of tiny INDICATORS list
+        canonical = resolve_indicator_name(indicator)
+        if canonical is None:
             return False, f"Condition {i} has unknown indicator: {indicator}"
 
         min_val = cond.get("min")
@@ -144,7 +148,19 @@ async def create_pattern(
     if origin not in VALID_ORIGINS and origin != "unknown":
         raise ValueError(f"Invalid origin: {origin}")
 
-    # Validate conditions
+    # Normalize indicator names to canonical forms before validation
+    from Fast_Swarm.local_agents.backtest.pattern_matcher import normalize_pattern_conditions
+
+    entry_conditions, removed_entry = normalize_pattern_conditions(entry_conditions)
+    if removed_entry:
+        print(f"[PatternService] Removed unresolvable entry indicators: {removed_entry}")
+
+    if exit_conditions:
+        exit_conditions, removed_exit = normalize_pattern_conditions(exit_conditions)
+        if removed_exit:
+            print(f"[PatternService] Removed unresolvable exit indicators: {removed_exit}")
+
+    # Validate conditions (after normalization)
     is_valid, error = validate_conditions(entry_conditions)
     if not is_valid:
         raise ValueError(f"Invalid entry conditions: {error}")

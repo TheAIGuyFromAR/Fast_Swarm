@@ -9,6 +9,8 @@ Patterns are tested across canonical periods (crash, bull, bear, etc.)
 to identify specialized patterns for different market conditions.
 """
 
+import asyncio
+import math
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -27,33 +29,16 @@ from Fast_Swarm.local_agents.core.canonical_periods import (
 from Fast_Swarm.local_agents.core.state import AgentRecord
 from Fast_Swarm.local_agents.core.traits import AgentTraits
 
+from Fast_Swarm.Metrics.metrics_constants import REGIME_WEIGHTS as _REGIME_WEIGHTS
+
 from ..Models.pattern_models import Pattern
 
 
 class PatternBacktestService:
     """Service for backtesting patterns using PostgreSQL data."""
 
-    # Regime importance weights (same as AgentBacktestService)
-    # Higher weights = harder market conditions worth more in fitness
-    REGIME_WEIGHTS = {
-        # Random windows (baseline difficulty)
-        "random_1m": 1.0,
-        "random_5m": 1.0,
-        "random_15m": 1.0,
-        "random_1h": 1.0,
-        "random_4h": 1.0,
-        "random_1d": 1.0,
-        # Canonical periods (varying difficulty)
-        "bull": 0.5,  # Everyone can win in a bull market
-        "bear": 2.0,  # Harder to profit when prices fall
-        "crash": 3.0,  # Survival is critical - highest weight
-        "sideways": 2.5,  # Market spends most time here, hard to profit
-        "blowoff": 1.5,  # Volatility spike before reversal
-        "recovery": 1.5,  # Catching the bounce
-        "volatile": 2.0,  # High uncertainty
-        "winter": 2.0,  # Extended bear
-        "transition": 1.5,  # Regime change
-    }
+    # Regime importance weights (centralized in metrics_constants.py)
+    REGIME_WEIGHTS = _REGIME_WEIGHTS
 
     # Random window generation settings
     WINDOWS_PER_ASSET_PER_TF = 10  # Fewer than agents since patterns are faster to test
@@ -108,7 +93,11 @@ class PatternBacktestService:
         default_traits = AgentTraits()
         config = BacktestConfig.from_traits(default_traits)
 
-        for pattern in patterns:
+        for i, pattern in enumerate(patterns):
+            # Yield to event loop every 5 patterns to prevent dashboard stalls
+            if i % 5 == 0 and i > 0:
+                await asyncio.sleep(0.01)
+
             try:
                 # Create pattern dict for engine
                 pattern_dict = {
@@ -231,7 +220,11 @@ class PatternBacktestService:
         default_traits = AgentTraits()
         config = BacktestConfig.from_traits(default_traits)
 
-        for pattern in patterns:
+        for i, pattern in enumerate(patterns):
+            # Yield to event loop every 5 patterns to prevent dashboard stalls
+            if i % 5 == 0 and i > 0:
+                await asyncio.sleep(0.01)
+
             try:
                 pattern_dict = {
                     pattern.pattern_id: {
@@ -252,7 +245,10 @@ class PatternBacktestService:
                 # Track results by regime (canonical + random_*)
                 regime_results: dict[str, list] = {}
 
-                for window in all_windows:
+                for j, window in enumerate(all_windows):
+                    # Yield to event loop every 5 windows to prevent dashboard stalls
+                    if j % 5 == 0 and j > 0:
+                        await asyncio.sleep(0.01)
                     regime = window["regime"]
                     if regime not in regime_results:
                         regime_results[regime] = []
@@ -285,16 +281,33 @@ class PatternBacktestService:
                         avg_fitness = sum(m.get("fitness_score", 0) for m in metrics_list) / len(metrics_list)
                         total_trades = sum(m.get("total_trades", 0) for m in metrics_list)
                         avg_win_rate = sum(m.get("win_rate", 0) or 0 for m in metrics_list) / len(metrics_list)
+                        # Sharpe
                         avg_sharpe_vals = [
                             m.get("sharpe_ratio") for m in metrics_list if m.get("sharpe_ratio") is not None
                         ]
                         avg_sharpe = sum(avg_sharpe_vals) / len(avg_sharpe_vals) if avg_sharpe_vals else None
+                        # Sortino
+                        avg_sortino_vals = [
+                            m.get("sortino_ratio") for m in metrics_list if m.get("sortino_ratio") is not None
+                        ]
+                        avg_sortino = sum(avg_sortino_vals) / len(avg_sortino_vals) if avg_sortino_vals else None
+                        # Calmar
+                        avg_calmar_vals = [
+                            m.get("calmar_ratio") for m in metrics_list if m.get("calmar_ratio") is not None
+                        ]
+                        avg_calmar = sum(avg_calmar_vals) / len(avg_calmar_vals) if avg_calmar_vals else None
+                        # Max drawdown (worst across windows)
+                        max_dd_vals = [m.get("max_drawdown_pct", 0) or 0 for m in metrics_list]
+                        max_dd = max(max_dd_vals) if max_dd_vals else 0.0
 
                         fitness_by_regime[regime] = {
                             "fitness": round(avg_fitness, 2),
                             "trades": total_trades,
                             "win_rate": round(avg_win_rate, 4),
                             "sharpe": round(avg_sharpe, 3) if avg_sharpe else None,
+                            "sortino": round(avg_sortino, 3) if avg_sortino else None,
+                            "calmar": round(avg_calmar, 3) if avg_calmar else None,
+                            "max_drawdown": round(max_dd, 2),
                             "windows_tested": len(metrics_list),
                         }
 
@@ -371,11 +384,15 @@ class PatternBacktestService:
         else:
             sharpe = None
 
-        # Sortino ratio
-        downside_returns = [r for r in returns if r < 0]
-        if len(downside_returns) > 1:
-            downside_std = statistics.stdev(downside_returns)
-            sortino = (avg_pnl / downside_std) if downside_std > 0 else 0
+        # Sortino ratio (correct downside deviation formula)
+        # Uses root mean squared downside deviation across ALL returns, not just negative ones
+        target_return = 0  # Risk-free rate (0 for crypto)
+        if len(returns) > 1:
+            squared_downside = [min(0, r - target_return) ** 2 for r in returns]
+            downside_deviation = math.sqrt(sum(squared_downside) / len(returns))
+            sortino = ((avg_pnl - target_return) / downside_deviation) if downside_deviation > 0 else 0
+            # Cap at ±6 like Sharpe
+            sortino = max(-6.0, min(6.0, sortino))
         else:
             sortino = None
 

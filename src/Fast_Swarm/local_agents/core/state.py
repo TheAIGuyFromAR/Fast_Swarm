@@ -90,12 +90,16 @@ class TradeRecord:
     mae_pct: float = 0.0
     mfe_price: float = 0.0
     mae_price: float = 0.0
-    position_size_pct: float = 1.0
+    position_size_pct: float = 5.0
     entry_confidence: float = 0.5
     decision_zone: str = "execute"
     ai_consulted: bool = False
     ai_decision: str | None = None
     created_at: int = 0
+    # Bear protection regime tracking
+    entry_regime: str = "NEUTRAL"  # DEFENSIVE, NEUTRAL, AGGRESSIVE
+    exit_regime: str = "NEUTRAL"
+    exit_reason: str = ""  # stop_loss, take_profit, trailing_stop, bear_protection_defensive, etc.
 
 
 # =============================================================================

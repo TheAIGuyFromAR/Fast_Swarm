@@ -20,10 +20,17 @@ Accumulation Mode (default ON for BTC/ETH/SOL):
 - Assumes patient capital with long time horizon
 """
 
+from __future__ import annotations
+
 import math
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from enum import Enum
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 from Fast_Swarm.local_agents.backtest.data import OHLCVLoader
 from Fast_Swarm.local_agents.backtest.pattern_matcher import evaluate_conditions
@@ -32,6 +39,9 @@ from Fast_Swarm.local_agents.core.state import AgentRecord, TradeRecord
 from Fast_Swarm.local_agents.core.traits import AgentTraits
 from Fast_Swarm.local_agents.shared.fast_inference import DecisionRequest, FastDecisionEngine
 from Fast_Swarm.local_agents.shared.llm_client import AIZoneHandler, AIZoneMode
+from Fast_Swarm.Infrastructure.Services.bear_protection_service import (
+    BearProtectionService, MarketState, Regime
+)
 
 # =============================================================================
 # Exit Strategy Types
@@ -150,7 +160,7 @@ def calculate_dynamic_trail(
 
 # Optional vLLM import (may not be installed)
 try:
-    from Fast_Swarm.local_agents.shared.vllm_client import VLLMAIZoneHandler, VLLMClient
+    from Fast_Swarm.local_agents.shared.vllm_client import VLLMAIZoneHandler, VLLMClient  # noqa: F401
 
     HAS_VLLM = True
 except ImportError:
@@ -260,7 +270,7 @@ class BacktestConfig:
     include_costs: bool = True
 
     @classmethod
-    def from_traits(cls, traits: AgentTraits) -> "BacktestConfig":
+    def from_traits(cls, traits: AgentTraits) -> BacktestConfig:
         """Create config from agent traits."""
         from Fast_Swarm.local_agents.core.traits import (
             calculate_max_hold_duration_ms,
@@ -325,6 +335,9 @@ class OpenTrade:
     position_remaining_pct: float = 100.0  # How much position is left
     scaled_exits_completed: int = 0  # How many partial exits done
 
+    # Bear protection regime tracking
+    entry_regime: str = "NEUTRAL"  # DEFENSIVE, NEUTRAL, AGGRESSIVE
+
     def update_mfe_mae(self, current_price: float):
         """Update MFE/MAE based on current price."""
         # GUARD: Protect against zero entry price (CRASH-003)
@@ -347,7 +360,7 @@ class OpenTrade:
         self,
         current_price: float,
         trail_pct: float,
-        config: "BacktestConfig",
+        config: BacktestConfig,
     ) -> bool:
         """
         Update trailing stop based on current price and exit strategy.
@@ -425,9 +438,9 @@ class LocalBacktestEngine:
         loader: OHLCVLoader | None = None,
         config: BacktestConfig | None = None,
         patterns: dict[str, dict] | None = None,
-        ai_zone_mode: AIZoneMode = AIZoneMode.HEURISTIC,
+        ai_zone_mode: AIZoneMode = AIZoneMode.VLLM,
         ai_zone_handler: AIZoneHandler | None = None,
-        preloaded_candles: dict[str, "pd.DataFrame"] | None = None,
+        preloaded_candles: dict[str, pd.DataFrame] | None = None,
         use_fast_inference: bool = True,
     ):
         """
@@ -437,7 +450,7 @@ class LocalBacktestEngine:
             loader: OHLCV data loader. Creates default if not provided.
             config: Backtest configuration.
             patterns: Dict of pattern_id -> pattern definition.
-            ai_zone_mode: Mode for AI_REFLECT zone (SKIP, HEURISTIC, LLM, VLLM, UNIFIED).
+            ai_zone_mode: Mode for AI_REFLECT zone (SKIP, LLM, VLLM, UNIFIED).
             ai_zone_handler: Pre-configured handler (overrides ai_zone_mode).
             preloaded_candles: Pre-loaded candle data as dict of asset -> DataFrame.
                                Use this to avoid repeated DB calls when backtesting many agents.
@@ -461,8 +474,8 @@ class LocalBacktestEngine:
                 self.ai_zone_handler = ai_zone_handler
             elif ai_zone_mode == AIZoneMode.VLLM:
                 if not HAS_VLLM:
-                    print("[Engine] vLLM not available, falling back to heuristic mode")
-                    self.ai_zone_handler = AIZoneHandler(mode=AIZoneMode.HEURISTIC)
+                    print("[Engine] vLLM not available, falling back to skip mode")
+                    self.ai_zone_handler = AIZoneHandler(mode=AIZoneMode.SKIP)
                 else:
                     self.ai_zone_handler = VLLMAIZoneHandler()
             else:
@@ -583,11 +596,12 @@ class LocalBacktestEngine:
         cache_key = f"{asset}_{timeframe}"
         if cache_key in self.preloaded_candles:
             candles_df = self.preloaded_candles[cache_key]
-            # Apply date filters if needed
-            if start_ts is not None:
-                candles_df = candles_df[candles_df["timestamp"] >= start_ts]
-            if end_ts is not None:
-                candles_df = candles_df[candles_df["timestamp"] <= end_ts]
+            # Apply date filters if needed (guard empty DataFrames from preload)
+            if len(candles_df) > 0 and "timestamp" in candles_df.columns:
+                if start_ts is not None:
+                    candles_df = candles_df[candles_df["timestamp"] >= start_ts]
+                if end_ts is not None:
+                    candles_df = candles_df[candles_df["timestamp"] <= end_ts]
         else:
             # Load candle data from database
             candles_df = self.loader.load_candles(
@@ -602,9 +616,13 @@ class LocalBacktestEngine:
             # Log insufficient data for debugging (helps diagnose 0-trade patterns)
             cache_hit = cache_key in self.preloaded_candles if self.preloaded_candles else False
             if len(candles_df) == 0:
-                print(f"  [Engine] {asset}/{timeframe}: No candles loaded (cache={'HIT' if cache_hit else 'MISS'}, ts={start_ts}-{end_ts})")
+                print(
+                    f"  [Engine] {asset}/{timeframe}: No candles loaded (cache={'HIT' if cache_hit else 'MISS'}, ts={start_ts}-{end_ts})"
+                )
             else:
-                print(f"  [Engine] {asset}/{timeframe}: Only {len(candles_df)} candles (need {config.min_candles_warmup})")
+                print(
+                    f"  [Engine] {asset}/{timeframe}: Only {len(candles_df)} candles (need {config.min_candles_warmup})"
+                )
             return []
 
         # Get indicator columns (only numeric columns)
@@ -635,18 +653,70 @@ class LocalBacktestEngine:
 
         n_candles = len(candles_df)
 
+        # === Bear Protection Integration ===
+        # Track regime scores: -1=DEFENSIVE, 0=NEUTRAL, +1=AGGRESSIVE
+        regime_scores = []
+        REGIME_MAP = {Regime.DEFENSIVE: -1, Regime.NEUTRAL: 0, Regime.AGGRESSIVE: 1}
+
+        # Pre-extract derivative columns if available (for bear protection)
+        # These are motion derivatives: velocity, acceleration, jerk of price/ADX
+        deriv_cols = {
+            "close_velocity": indicator_arrays.get("close_velocity"),
+            "close_acceleration": indicator_arrays.get("close_acceleration"),
+            "adx_14_jerk": indicator_arrays.get("adx_14_jerk"),
+        }
+
         # Iterate through candles (skip warmup period)
         for i in range(config.min_candles_warmup, n_candles):
             close_price = float(close_arr[i])
             timestamp = int(timestamp_arr[i])
 
             # Extract indicators using pre-extracted arrays (much faster than dict access)
-            indicators = {"close": close_price}
+            # Include timestamp so time-based computed indicators (isTuesday, isAsianSession, etc.) work
+            indicators = {"close": close_price, "timestamp": timestamp}
             for col, arr in indicator_arrays.items():
                 val = arr[i]
                 # numpy handles NaN check more efficiently
                 if val == val:  # Fast NaN check: NaN != NaN
                     indicators[col] = float(val)
+
+            # === Bear Protection: Simple single-TF regime check ===
+            # Using AJ (Acceleration + Jerk) thresholds from BearProtectionService
+            # DEFENSIVE: acc < -1.5 AND adx_jerk < -0.5
+            # AGGRESSIVE: vel < -0.5 AND acc > 1.5
+            close_acc = indicators.get("close_acceleration")
+            adx_jerk = indicators.get("adx_14_jerk")
+            close_vel = indicators.get("close_velocity")
+
+            # Default to NEUTRAL
+            regime = Regime.NEUTRAL
+            regime_score = 0
+
+            # Check DEFENSIVE (danger signal)
+            if close_acc is not None and adx_jerk is not None:
+                if close_acc < -1.5 and adx_jerk < -0.5:
+                    regime = Regime.DEFENSIVE
+                    regime_score = -1
+            # Check AGGRESSIVE (opportunity signal)
+            if regime == Regime.NEUTRAL and close_vel is not None and close_acc is not None:
+                if close_vel < -0.5 and close_acc > 1.5:
+                    regime = Regime.AGGRESSIVE
+                    regime_score = 1
+            regime_scores.append(regime_score)
+
+            # If DEFENSIVE and we have an open trade, force exit
+            if regime == Regime.DEFENSIVE and open_trade:
+                trade_record = self._close_trade(
+                    open_trade=open_trade,
+                    exit_price=close_price,
+                    exit_timestamp=timestamp,
+                    exit_reason="bear_protection_defensive",
+                    costs_pct=costs_pct,
+                    exit_regime=regime.value,
+                )
+                trades.append(trade_record)
+                open_trade = None
+                continue  # Skip normal exit check since we already exited
 
             # If we have an open trade, check for exit
             if open_trade:
@@ -669,6 +739,7 @@ class LocalBacktestEngine:
                         exit_timestamp=timestamp,
                         exit_reason=exit_reason,
                         costs_pct=costs_pct,
+                        exit_regime=regime.value,
                     )
                     trades.append(trade_record)
                     open_trade = None
@@ -686,6 +757,10 @@ class LocalBacktestEngine:
 
                 if entry_result:
                     pattern_id, confidence, direction, decision_zone, ai_consulted, ai_decision = entry_result
+
+                    # Skip entry if in DEFENSIVE regime (bear protection)
+                    if regime == Regime.DEFENSIVE:
+                        continue  # Don't open new trades in defensive mode
 
                     # Determine position size from traits
                     from Fast_Swarm.local_agents.core.traits import calculate_position_size
@@ -705,6 +780,7 @@ class LocalBacktestEngine:
                         ai_consulted=ai_consulted,
                         ai_decision=ai_decision,
                         position_size_pct=position_size * 100,
+                        entry_regime=regime.value,
                     )
 
         # Close any remaining open trade at end of data
@@ -712,12 +788,18 @@ class LocalBacktestEngine:
             # GUARD: Ensure we have data before accessing (CRASH-013)
             if len(close_arr) == 0:
                 return trades  # No data to close with
+            # Use last known regime (or NEUTRAL if no regime data)
+            final_regime = "NEUTRAL"
+            if regime_scores:
+                last_score = regime_scores[-1]
+                final_regime = "DEFENSIVE" if last_score == -1 else ("AGGRESSIVE" if last_score == 1 else "NEUTRAL")
             trade_record = self._close_trade(
                 open_trade=open_trade,
                 exit_price=float(close_arr[-1]),
                 exit_timestamp=int(timestamp_arr[-1]),
                 exit_reason="end_of_data",
                 costs_pct=costs_pct,
+                exit_regime=final_regime,
             )
             trades.append(trade_record)
 
@@ -948,6 +1030,7 @@ class LocalBacktestEngine:
         exit_timestamp: int,
         exit_reason: str,
         costs_pct: float,
+        exit_regime: str = "NEUTRAL",
     ) -> TradeRecord:
         """Close trade and create TradeRecord."""
         # GUARD: Division by zero protection
@@ -983,7 +1066,135 @@ class LocalBacktestEngine:
             decision_zone=open_trade.decision_zone,
             ai_consulted=open_trade.ai_consulted,
             ai_decision=open_trade.ai_decision,
+            entry_regime=open_trade.entry_regime,
+            exit_regime=exit_regime,
+            exit_reason=exit_reason,
         )
+
+
+# =============================================================================
+# Regime Statistics
+# =============================================================================
+
+
+def calculate_regime_stats(trades: list[TradeRecord]) -> dict:
+    """
+    Calculate regime-based performance statistics from trades.
+
+    Returns breakdown of trades/PnL by entry and exit regime.
+
+    Args:
+        trades: List of TradeRecords with regime tracking.
+
+    Returns:
+        Dict with regime statistics:
+        - by_entry_regime: {DEFENSIVE: {...}, NEUTRAL: {...}, AGGRESSIVE: {...}}
+        - by_exit_regime: {DEFENSIVE: {...}, ...}
+        - regime_transitions: counts of regime changes (e.g., NEUTRAL->DEFENSIVE)
+        - defensive_exits: count of forced bear protection exits
+    """
+    if not trades:
+        return {
+            "by_entry_regime": {},
+            "by_exit_regime": {},
+            "regime_transitions": {},
+            "defensive_exits": 0,
+        }
+
+    # Accumulate stats by regime
+    entry_stats: dict[str, dict] = {}
+    exit_stats: dict[str, dict] = {}
+    transitions: dict[str, int] = {}
+    defensive_exits = 0
+
+    for trade in trades:
+        entry_regime = getattr(trade, "entry_regime", "NEUTRAL")
+        exit_regime = getattr(trade, "exit_regime", "NEUTRAL")
+        exit_reason = getattr(trade, "exit_reason", "")
+        pnl = trade.pnl_pct
+
+        # Entry regime stats
+        if entry_regime not in entry_stats:
+            entry_stats[entry_regime] = {"count": 0, "total_pnl": 0.0, "wins": 0, "losses": 0}
+        entry_stats[entry_regime]["count"] += 1
+        entry_stats[entry_regime]["total_pnl"] += pnl
+        if pnl > 0:
+            entry_stats[entry_regime]["wins"] += 1
+        else:
+            entry_stats[entry_regime]["losses"] += 1
+
+        # Exit regime stats
+        if exit_regime not in exit_stats:
+            exit_stats[exit_regime] = {"count": 0, "total_pnl": 0.0, "wins": 0, "losses": 0}
+        exit_stats[exit_regime]["count"] += 1
+        exit_stats[exit_regime]["total_pnl"] += pnl
+        if pnl > 0:
+            exit_stats[exit_regime]["wins"] += 1
+        else:
+            exit_stats[exit_regime]["losses"] += 1
+
+        # Regime transition
+        transition_key = f"{entry_regime}->{exit_regime}"
+        transitions[transition_key] = transitions.get(transition_key, 0) + 1
+
+        # Bear protection force exits
+        if exit_reason == "bear_protection_defensive":
+            defensive_exits += 1
+
+    # Calculate averages and win rates
+    for regime, stats in entry_stats.items():
+        stats["avg_pnl"] = stats["total_pnl"] / stats["count"] if stats["count"] > 0 else 0.0
+        stats["win_rate"] = stats["wins"] / stats["count"] if stats["count"] > 0 else 0.0
+
+    for regime, stats in exit_stats.items():
+        stats["avg_pnl"] = stats["total_pnl"] / stats["count"] if stats["count"] > 0 else 0.0
+        stats["win_rate"] = stats["wins"] / stats["count"] if stats["count"] > 0 else 0.0
+
+    return {
+        "by_entry_regime": entry_stats,
+        "by_exit_regime": exit_stats,
+        "regime_transitions": transitions,
+        "defensive_exits": defensive_exits,
+    }
+
+
+def format_regime_stats(stats: dict) -> str:
+    """Format regime stats as human-readable string."""
+    if not stats or not stats.get("by_entry_regime"):
+        return "No regime data"
+
+    lines = ["[Regime Breakdown]"]
+
+    # Entry regime stats
+    entry = stats.get("by_entry_regime", {})
+    if entry:
+        lines.append("  Entry Regime:")
+        for regime in ["DEFENSIVE", "NEUTRAL", "AGGRESSIVE"]:
+            if regime in entry:
+                s = entry[regime]
+                lines.append(
+                    f"    {regime}: {s['count']} trades, "
+                    f"avg={s['avg_pnl']:.1f}%, win={s['win_rate']*100:.0f}%"
+                )
+
+    # Exit regime stats
+    exit_s = stats.get("by_exit_regime", {})
+    if exit_s:
+        lines.append("  Exit Regime:")
+        for regime in ["DEFENSIVE", "NEUTRAL", "AGGRESSIVE"]:
+            if regime in exit_s:
+                s = exit_s[regime]
+                lines.append(
+                    f"    {regime}: {s['count']} trades, "
+                    f"avg={s['avg_pnl']:.1f}%, win={s['win_rate']*100:.0f}%"
+                )
+
+    # Bear protection exits
+    defensive_exits = stats.get("defensive_exits", 0)
+    if defensive_exits > 0:
+        lines.append(f"  Bear Protection Force Exits: {defensive_exits}")
+
+    return "\n".join(lines)
 
 
 # =============================================================================
@@ -1032,7 +1243,7 @@ def calculate_mfe_mae(
 def create_backtest_engine(
     patterns: dict[str, dict] | None = None,
     db_path: str | None = None,
-    ai_zone_mode: AIZoneMode = AIZoneMode.HEURISTIC,
+    ai_zone_mode: AIZoneMode = AIZoneMode.VLLM,
 ) -> LocalBacktestEngine:
     """
     Create a configured backtest engine.
@@ -1040,7 +1251,7 @@ def create_backtest_engine(
     Args:
         patterns: Pattern definitions.
         db_path: Path to OHLCV database.
-        ai_zone_mode: Mode for AI_REFLECT zone (SKIP, HEURISTIC, LLM).
+        ai_zone_mode: Mode for AI_REFLECT zone (SKIP, LLM, VLLM, UNIFIED).
 
     Returns:
         Configured LocalBacktestEngine.

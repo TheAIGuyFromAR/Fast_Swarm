@@ -14,45 +14,91 @@ from typing import Any
 # Constants - Supported Indicators
 # =============================================================================
 
-INDICATORS = [
-    "rsi",
-    "macd",
-    "macd_signal",
-    "macd_histogram",
-    "bb_upper",
-    "bb_middle",
-    "bb_lower",
-    "bb_width",
-    "atr",
-    "adx",
-    "obv",
-    "volume_ratio",
-    "ema_9",
-    "ema_21",
-    "ema_50",
-    "sma_200",
-    "stoch_k",
-    "stoch_d",
-    "williams_r",
-    "cci",
-    "roc",
-    "momentum",
-    "mfi",
-    "vwap",
-]
+# Derived from the canonical INDICATOR_ALIASES registry in pattern_matcher.py.
+# This is the authoritative set of all indicators the system can resolve.
+# Previously this was a hardcoded list of 24 indicators which caused
+# false "unknown indicator" errors for any indicator beyond the original set.
+def _get_all_indicators() -> list[str]:
+    """Get all canonical indicator names from the pattern_matcher registry."""
+    try:
+        from Fast_Swarm.local_agents.backtest.pattern_matcher import INDICATOR_ALIASES, COMPUTED_INDICATORS
+        canonical = set(INDICATOR_ALIASES.values())
+        canonical.update(COMPUTED_INDICATORS)
+        return sorted(canonical)
+    except ImportError:
+        # Fallback if pattern_matcher not available (e.g., during testing)
+        return [
+            "rsi_14", "macd_line", "macd_signal", "macd_histogram",
+            "bb_upper", "bb_middle", "bb_lower", "bb_bandwidth",
+            "atr_14", "adx_14", "obv", "volume_sma_20",
+            "ema_9", "ema_21", "ema_26", "sma_200",
+            "stoch_k", "stoch_d", "willr_14", "cci_14",
+            "roc_10", "mom_10", "mfi_14", "close",
+        ]
 
-# Indicator bounds for validation
+
+INDICATORS = _get_all_indicators()
+
+# Indicator bounds for mutation clamping (uses canonical DB column names)
 INDICATOR_BOUNDS = {
-    "rsi": (0, 100),
+    # RSI variants (0-100)
+    "rsi_7": (0, 100),
+    "rsi_14": (0, 100),
+    "rsi_21": (0, 100),
+    # Stochastic (0-100)
     "stoch_k": (0, 100),
     "stoch_d": (0, 100),
+    "stochrsi_k": (0, 100),
+    "stochrsi_d": (0, 100),
+    # ADX (0-100)
+    "adx_14": (0, 100),
+    # MFI (0-100)
+    "mfi_14": (0, 100),
+    # Williams %R (-100 to 0)
+    "willr_14": (-100, 0),
+    # ATR (always positive)
+    "atr_7": (0, float("inf")),
+    "atr_14": (0, float("inf")),
+    "natr_14": (0, 20),
+    # Volume (always positive)
+    "volume_sma_20": (0, float("inf")),
+    # Bollinger
+    "bb_bandwidth": (0, float("inf")),
+    "bb_percent": (-0.5, 1.5),
+    # CCI (typically -300 to 300)
+    "cci_14": (-300, 300),
+    # ROC/Momentum (unbounded but reasonable)
+    "roc_10": (-50, 50),
+    "mom_10": (-100, 100),
+    # CMO (0-100 typically)
+    "cmo_14": (-100, 100),
+    # UO (0-100)
+    "uo": (0, 100),
+    # PPO (-5 to 5)
+    "ppo": (-5, 5),
+    # Fisher (-5 to 5)
+    "fisher": (-5, 5),
+    "fisher_signal": (-5, 5),
+    # Ulcer Index (0-100)
+    "ui_14": (0, 100),
+    # Bias (-10 to 10%)
+    "bias_26": (-10, 10),
+    # Z-Score (-4 to 4)
+    "zscore_30": (-4, 4),
+    # Supertrend direction (-1 or 1)
+    "supertrend_direction": (-1, 1),
+    # Aroon (0-100)
+    "aroon_up": (0, 100),
+    "aroon_down": (0, 100),
+    "aroon_osc": (-100, 100),
+    # Legacy aliases (for backwards compatibility with old patterns)
+    "rsi": (0, 100),
     "adx": (0, 100),
     "mfi": (0, 100),
     "williams_r": (-100, 0),
     "atr": (0, float("inf")),
     "volume_ratio": (0, float("inf")),
     "bb_width": (0, float("inf")),
-    # MACD, CCI, ROC, momentum are unbounded
 }
 
 # Default lookback periods
@@ -161,6 +207,7 @@ def match_indicator_condition(
     indicator_name: str,
     indicator_value: float | None,
     condition: dict[str, Any],
+    log_missing: bool = False,
 ) -> bool:
     """
     Match a single indicator against a condition.
@@ -169,11 +216,14 @@ def match_indicator_condition(
         indicator_name: Name of the indicator
         indicator_value: Current value of the indicator
         condition: Dict with 'min' and 'max' keys
+        log_missing: If True, log when indicator is missing (for debugging)
 
     Returns:
         True if indicator matches condition
     """
     if indicator_value is None:
+        if log_missing:
+            print(f"  [PatternMatch] Missing indicator: {indicator_name}")
         return False
 
     min_val = condition.get("min", float("-inf"))
@@ -434,6 +484,49 @@ def match_pattern(
             "exit_conditions_matched": exit_count,
         },
     )
+
+
+def diagnose_pattern_mismatch(
+    pattern: dict[str, Any],
+    indicators: dict[str, float],
+) -> dict[str, Any]:
+    """
+    Diagnose why a pattern isn't matching - lists missing/invalid indicators.
+
+    Use this function to debug when patterns return 0 trades.
+
+    Args:
+        pattern: Pattern dict with entry_conditions
+        indicators: Dict of indicator name -> value
+
+    Returns:
+        Dict with diagnostic info about missing/invalid indicators
+    """
+    entry_conditions = pattern.get("entry_conditions", [])
+    missing = []
+    invalid = []
+    present = []
+
+    for cond in entry_conditions:
+        indicator_name = cond.get("indicator")
+        if indicator_name is None:
+            continue
+
+        value = indicators.get(indicator_name)
+        if value is None:
+            missing.append(indicator_name)
+        elif isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
+            invalid.append({"name": indicator_name, "value": value})
+        else:
+            present.append({"name": indicator_name, "value": value})
+
+    return {
+        "total_conditions": len(entry_conditions),
+        "missing_indicators": missing,
+        "invalid_indicators": invalid,
+        "present_indicators": len(present),
+        "available_indicator_keys": list(indicators.keys())[:20],  # First 20 for debugging
+    }
 
 
 def match_pattern_against_candle(

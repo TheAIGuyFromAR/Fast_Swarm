@@ -19,6 +19,42 @@ All non-trivial todos from Claude sessions are logged here.
 - [ ] Start live_collector.py with PostgreSQL backend
 - [ ] Verify data is flowing into PostgreSQL tables
 
+### Multi-Brokerage + Dashboard + Decision Feed (Current)
+- [x] Create llm_logger.py with LLMResponseRecord dataclass and log_llm_response function
+- [x] Add log_llm_response calls to _decide_with_llm (SUCCESS + PARSE FAIL)
+- [x] Add log_llm_response calls to _decide_with_llm_async (SUCCESS + PARSE FAIL)
+- [x] Configure llm_responses logger with FileHandler in Main.py lifespan
+- [x] Fix pattern stats: add sortino_ratio to PatternSummary model
+- [x] Fix pattern stats: update leaderboard response mapping in pattern_router.py
+- [x] Fix pattern stats: update renderPatternsTable() in app.js to handle nulls
+- [x] Fix trading buttons: add error handling and empty-state to populateAgentDropdown()
+- [x] Add CULL WEAK + DISCOVER buttons to pattern page in index.html
+- [x] Add SPAWN + CULL + EVOLVE buttons to agent page in index.html
+- [x] Add cullWeakPatterns() + triggerPatternDiscovery() JS functions
+- [x] Add spawnAgents() + cullAgents() + runEvolution() JS functions
+- [x] Add POST /patterns/cull endpoint in pattern_router.py
+- [x] Create decision_feed_service.py with DecisionEvent + DecisionFeedService
+- [x] Add SSE /decisions/feed endpoint to trading_router.py
+- [x] Add GET /decisions/recent endpoint to trading_router.py
+- [ ] Emit DecisionEvent from paper_trading_service after zone decision
+- [ ] Emit DecisionEvent from paper_trading_service after LLM result
+- [ ] Add decision feed HTML panel to trading page in index.html
+- [ ] Add connectDecisionFeed() + appendDecisionEvent() JS functions
+- [ ] Add approveDecision() + rejectDecision() JS functions
+- [ ] Add decision feed CSS styling to cyberpunk.css
+- [x] Add asyncio.sleep(0.01) yield in pattern backtest loop
+- [x] Add AssetClass + AccountType enums to portfolio_agent_service.py
+- [x] Add is_market_open() + classify_asset() to ExchangeClient ABC
+- [x] Create exchanges/assets.py with BITCOIN_ECOSYSTEM, EXCHANGE_FEES, MARKET_HOURS
+- [x] Create exchanges/alpaca_client.py implementing ExchangeClient ABC
+- [x] Create exchanges/alpaca_portfolio_agent.py with notional orders + market clock
+- [x] Create exchanges/ibkr_client.py implementing ExchangeClient ABC
+- [x] Create exchanges/ibkr_portfolio_agent.py with IRA constraints + contract details
+- [x] Create exchanges/cryptocom_portfolio_agent.py wrapping existing REST client
+- [ ] Add PortfolioState.total_equity and agent_allocations for balance pot
+- [ ] Add balance pot display to dashboard trading panel
+- [ ] Install alpaca-py and ib_insync dependencies
+
 ### Deep Trace (Deferred)
 - [x] Fix remaining test_crucible.py failures (CrucibleEntry signature, pattern storage tests)
 - [x] Test Deep Trace failures: HAS_LOCAL_BACKTEST=False, empty entry_conditions, missing indicators

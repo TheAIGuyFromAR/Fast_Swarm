@@ -50,6 +50,13 @@ def evaluate_condition_confidence(
 
     Parity with V3 `evaluateConditionConfidence`.
     """
+    # Guard against non-numeric types (e.g., Decimal, numpy str, or DB object types)
+    try:
+        value = float(value)
+        threshold = float(threshold)
+    except (TypeError, ValueError):
+        return 0.0
+
     if not math.isfinite(value):
         return 0.0
 

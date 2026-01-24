@@ -417,6 +417,10 @@ class AgentEvolutionService:
                     else:
                         mutated_traits[key] = value
 
+                # Recalculate derived traits (depend on risk_tolerance, hold_duration_bias)
+                from Fast_Swarm.Agents.Services.agent_service import calculate_derived_traits
+                mutated_traits = calculate_derived_traits(mutated_traits)
+
                 # Get patterns from parent's JSONB
                 available_patterns = _extract_patterns_from_agent(parent)
 
@@ -454,11 +458,13 @@ class AgentEvolutionService:
 
             except Exception as e:
                 logger.error(f"Clone failed for {parent.agent_id}: {e}", exc_info=True)
-                failures.append({
-                    "parent_id": parent.agent_id,
-                    "error": str(e),
-                    "error_type": type(e).__name__,
-                })
+                failures.append(
+                    {
+                        "parent_id": parent.agent_id,
+                        "error": str(e),
+                        "error_type": type(e).__name__,
+                    }
+                )
 
         # Batch add all clones and updated parents
         for clone in clones_to_add:
@@ -520,7 +526,7 @@ class AgentEvolutionService:
         mixed_traits = {}
         for key in traits_a.keys():
             val_a = traits_a.get(key, 0)
-            val_b = traits_b.get(key, 0)
+            val_b = traits_b.get(key, traits_a.get(key, 0.5))
 
             if isinstance(val_a, (int, float)) and isinstance(val_b, (int, float)):
                 # 50% chance from each parent + noise
@@ -529,6 +535,10 @@ class AgentEvolutionService:
                 mixed_traits[key] = max(0, min(1, base + noise))
             else:
                 mixed_traits[key] = val_a  # Default to parent A
+
+        # Recalculate derived traits (depend on risk_tolerance, hold_duration_bias)
+        from Fast_Swarm.Agents.Services.agent_service import calculate_derived_traits
+        mixed_traits = calculate_derived_traits(mixed_traits)
 
         # Create child
         from Fast_Swarm.local_agents.core.genesis import spawn_agent

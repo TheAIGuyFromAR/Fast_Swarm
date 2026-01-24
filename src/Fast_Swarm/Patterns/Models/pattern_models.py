@@ -21,6 +21,7 @@ class PatternSummary(SQLModel):
     fitness_score: float | None = None
     total_roi_pct: float | None = None
     sharpe_ratio: float | None = None
+    sortino_ratio: float | None = None
     win_rate: float | None = None
     profit_factor: float | None = None
     max_drawdown_pct: float | None = None
@@ -149,6 +150,10 @@ class Pattern(SQLModel, table=True):
     last_selected_at: datetime | None = None
     total_runs: int = Field(default=0)
     assigned_agent_id: str | None = None
+
+    # Validation (patterns with unresolvable indicators get flagged)
+    # Format: {"status": "invalid", "unresolvable": ["hold_candles"], "validated_at": "..."}
+    validation_issues: dict[str, Any] | None = Field(default=None, sa_column=Column(JSONB))
 
     # Provenance tracking
     source_db: str | None = None

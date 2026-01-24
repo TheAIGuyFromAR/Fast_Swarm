@@ -236,6 +236,7 @@ async def update_priority_after_backtest(
     new_runs: int,
     new_periods_tested: int,
     new_fitness: float,
+    new_total_trades: int = 0,
 ) -> None:
     """
     Update pattern's priority after a backtest run.
@@ -246,6 +247,7 @@ async def update_priority_after_backtest(
         new_runs: Updated total_runs count
         new_periods_tested: Updated periods_tested count
         new_fitness: Updated fitness score
+        new_total_trades: Updated total_trades count
     """
     # Get pattern origin
     result = await session.execute(text("SELECT origin FROM patterns WHERE pattern_id = :pid"), {"pid": pattern_id})
@@ -286,15 +288,29 @@ async def update_priority_after_backtest(
     priority_map = {Priority.HIGH: 1, Priority.NORMAL: 2, Priority.LOW: 3}
     db_priority = priority_map.get(priority, 2)
 
+    # CRITICAL: If 0 trades, fitness should be 0 (pattern doesn't work)
+    effective_fitness = 0.0 if new_total_trades == 0 else new_fitness
+
     await session.execute(
         text("""
             UPDATE patterns
             SET priority = :priority,
                 periods_tested = :periods,
-                total_runs = :runs
+                total_runs = :runs,
+                fitness_score = :fitness,
+                total_trades = COALESCE(total_trades, 0) + :new_trades,
+                status = CASE WHEN status = 'untested' THEN 'tested' ELSE status END,
+                last_backtest_at = NOW()
             WHERE pattern_id = :pid
         """),
-        {"priority": db_priority, "periods": new_periods_tested, "runs": new_runs, "pid": pattern_id},
+        {
+            "priority": db_priority,
+            "periods": new_periods_tested,
+            "runs": new_runs,
+            "fitness": effective_fitness,
+            "new_trades": new_total_trades,
+            "pid": pattern_id,
+        },
     )
     await session.commit()
 

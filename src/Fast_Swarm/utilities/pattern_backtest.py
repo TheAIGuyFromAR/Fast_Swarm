@@ -162,6 +162,53 @@ async def generate_random_windows(
     return windows
 
 
+def _calculate_regime_stats(trades: list[dict]) -> dict:
+    """
+    Calculate regime-based performance statistics from trades.
+
+    Args:
+        trades: List of trade dicts with regime tracking fields
+
+    Returns:
+        Dict with:
+        - by_entry_regime: stats per regime at entry
+        - defensive_exits: count of bear protection force exits
+    """
+    if not trades:
+        return {"by_entry_regime": {}, "defensive_exits": 0}
+
+    entry_stats: dict[str, dict] = {}
+    defensive_exits = 0
+
+    for trade in trades:
+        entry_regime = trade.get("entry_regime", "NEUTRAL")
+        exit_reason = trade.get("exit_reason", "")
+        pnl = trade.get("pnl_pct", 0) or 0
+
+        # Entry regime stats
+        if entry_regime not in entry_stats:
+            entry_stats[entry_regime] = {"count": 0, "total_pnl": 0.0, "wins": 0}
+        entry_stats[entry_regime]["count"] += 1
+        entry_stats[entry_regime]["total_pnl"] += pnl
+        if pnl > 0:
+            entry_stats[entry_regime]["wins"] += 1
+
+        # Count bear protection force exits
+        if exit_reason == "bear_protection_defensive":
+            defensive_exits += 1
+
+    # Calculate averages and win rates
+    for regime, stats in entry_stats.items():
+        count = stats["count"]
+        stats["avg_pnl"] = round(stats["total_pnl"] / count, 2) if count > 0 else 0.0
+        stats["win_rate"] = round(stats["wins"] / count * 100, 1) if count > 0 else 0.0
+
+    return {
+        "by_entry_regime": entry_stats,
+        "defensive_exits": defensive_exits,
+    }
+
+
 def calculate_metrics_for_trades(
     trades: list[dict],
     benchmark_return_pct: float = 0.0,
@@ -185,6 +232,9 @@ def calculate_metrics_for_trades(
         Dict with all metrics
     """
     if not trades:
+        # No trades = 0% return, so alpha = -benchmark (you underperformed by not trading)
+        # If benchmark was +5% and you sat out, your alpha is -5%
+        alpha_pct = -benchmark_return_pct if benchmark_return_pct else 0.0
         return {
             "total_trades": 0,
             "winning_trades": 0,
@@ -198,7 +248,7 @@ def calculate_metrics_for_trades(
             "calmar_ratio": 0.0,
             "profit_factor": 0.0,
             "benchmark_return_pct": benchmark_return_pct,
-            "alpha_pct": 0.0,
+            "alpha_pct": alpha_pct,
             "expectancy_pct": 0.0,
             "fitness_score": 0.0,
             "window_name": window_name,
@@ -227,34 +277,16 @@ def calculate_metrics_for_trades(
     avg_loss = abs(sum(losing) / len(losing)) if losing else 0.0
     expectancy_pct = (win_rate / 100 * avg_win) - ((1 - win_rate / 100) * avg_loss)
 
-    # Max drawdown
-    equity = 100.0
-    peak_equity = equity
-    max_drawdown_pct = 0.0
-    for pnl in pnls:
-        equity *= 1 + pnl / 100
-        if equity > peak_equity:
-            peak_equity = equity
-        if peak_equity > 0:
-            dd = (peak_equity - equity) / peak_equity * 100
-            max_drawdown_pct = max(max_drawdown_pct, dd)
-
-    # Sharpe ratio
-    if len(pnls) > 1:
-        std_pnl = np.std(pnls)
-        sharpe_ratio = (avg_pnl_pct / std_pnl * np.sqrt(252)) if std_pnl > 0 else 0.0
-        sharpe_ratio = max(-6.0, min(6.0, sharpe_ratio))  # Cap at ±6
-    else:
-        sharpe_ratio = 0.0
-
-    # Sortino ratio
-    downside = [p for p in pnls if p < 0]
-    if downside:
-        downside_std = np.std(downside)
-        sortino_ratio = (avg_pnl_pct / downside_std * np.sqrt(252)) if downside_std > 0 else sharpe_ratio
-        sortino_ratio = max(-10.0, min(10.0, sortino_ratio))
-    else:
-        sortino_ratio = sharpe_ratio * 1.5
+    # Metrics via QuantStats-backed engine
+    from Fast_Swarm.Metrics.metrics_engine import (
+        calculate_max_drawdown as _engine_dd,
+        calculate_sharpe as _engine_sh,
+        calculate_sortino as _engine_so,
+    )
+    returns_frac = [p / 100 for p in pnls]
+    max_drawdown_pct = _engine_dd(returns_frac) * 100
+    sharpe_ratio = _engine_sh(returns_frac)
+    sortino_ratio = _engine_so(returns_frac)
 
     # Calmar ratio
     calmar_ratio = total_pnl_pct / max_drawdown_pct if max_drawdown_pct > 0 else total_pnl_pct
@@ -291,6 +323,9 @@ def calculate_metrics_for_trades(
     )
     fitness_score = round(max(0, min(100, fitness_score)), 2)
 
+    # Calculate regime stats from trades (if regime data available)
+    regime_stats = _calculate_regime_stats(trades)
+
     return {
         "total_trades": total_trades,
         "winning_trades": winning_trades,
@@ -309,6 +344,7 @@ def calculate_metrics_for_trades(
         "fitness_score": fitness_score,
         "window_name": window_name,
         "window_days": window_days,
+        "regime_stats": regime_stats,  # Bear protection tracking
     }
 
 
@@ -414,8 +450,17 @@ async def backtest_pattern_on_windows(
                     },
                 )
 
-                # Convert to dicts
-                trade_dicts = [{"pnl_pct": t.pnl_pct} for t in trades if hasattr(t, "pnl_pct")]
+                # Convert to dicts - preserve regime tracking info
+                trade_dicts = []
+                for t in trades:
+                    if hasattr(t, "pnl_pct"):
+                        trade_dict = {
+                            "pnl_pct": t.pnl_pct,
+                            "entry_regime": getattr(t, "entry_regime", "NEUTRAL"),
+                            "exit_regime": getattr(t, "exit_regime", "NEUTRAL"),
+                            "exit_reason": getattr(t, "exit_reason", ""),
+                        }
+                        trade_dicts.append(trade_dict)
 
             else:
                 # Fallback: simple simulation (no indicator matching)
@@ -423,24 +468,28 @@ async def backtest_pattern_on_windows(
                     session, asset, timeframe, window["start_ts"], window["end_ts"], entry_conditions, exit_config
                 )
 
-            if trade_dicts:
-                # Calculate benchmark for this window
-                benchmark = await _get_window_benchmark(session, asset, timeframe, window["start_ts"], window["end_ts"])
+            # Always record a result - even 0 trades is valid data (0% ROI, 0% DD)
+            # A window that was tested but produced no trades has:
+            # - Starting balance = Ending balance
+            # - 0% return, 0% drawdown, 0 trades
+            benchmark = await _get_window_benchmark(session, asset, timeframe, window["start_ts"], window["end_ts"])
 
-                metrics = calculate_metrics_for_trades(
-                    trade_dicts,
-                    benchmark_return_pct=benchmark,
-                    window_name=window.get("name", "unknown"),
-                    window_days=window.get("days", 0),
-                )
+            # calculate_metrics_for_trades handles empty trade list properly
+            # Pass trade_dicts (even if empty) to get consistent metric structure
+            metrics = calculate_metrics_for_trades(
+                trade_dicts if trade_dicts else [],
+                benchmark_return_pct=benchmark,
+                window_name=window.get("name", "unknown"),
+                window_days=window.get("days", 0),
+            )
 
-                metrics["pattern_id"] = pattern_id
-                metrics["asset"] = asset
-                metrics["timeframe"] = timeframe
-                metrics["regime"] = window.get("regime", "random")
-                metrics["run_at"] = datetime.utcnow().isoformat()
+            metrics["pattern_id"] = pattern_id
+            metrics["asset"] = asset
+            metrics["timeframe"] = timeframe
+            metrics["regime"] = window.get("regime", "random")
+            metrics["run_at"] = datetime.utcnow().isoformat()
 
-                results.append(metrics)
+            results.append(metrics)
 
         except Exception as e:
             print(f"[Backtest] Window error for {pattern_id}: {e}")

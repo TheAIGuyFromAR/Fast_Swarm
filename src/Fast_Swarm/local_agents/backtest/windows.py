@@ -28,6 +28,24 @@ from sqlalchemy import and_, select, text
 from Fast_Swarm.Infrastructure.Models.market_data_models import BacktestWindow
 
 
+def extend_pool(failures: list, seed: int | None = None) -> dict:
+    """
+    Extend pool to fix coverage gaps.
+
+    TODO: Implement this function to add windows for pairs below coverage targets.
+
+    Args:
+        failures: List of (symbol, timeframe) pairs below targets
+        seed: Random seed for reproducibility
+
+    Returns:
+        Dict with windows_added and pairs_fixed counts
+    """
+    # Stub implementation - logs warning and returns empty result
+    print(f"[WARNING] extend_pool not fully implemented, {len(failures)} failures unaddressed")
+    return {"windows_added": 0, "pairs_fixed": 0}
+
+
 @dataclass(frozen=True)
 class Window:
     """Immutable backtest window specification."""
@@ -54,6 +72,51 @@ class Window:
 
 # Timeframes to use (skip 6h - won't be backfilled)
 TIMEFRAMES = ["1m", "5m", "15m", "1h", "4h", "1d"]
+
+# =============================================================================
+# Backtest Speed Modes
+# =============================================================================
+# NORMAL: All timeframes (full coverage, slowest - 1m takes hours to enrich)
+# TURBO: 15m and slower (skip 1m, 5m - much faster enrichment)
+# HYPERSPEED: 1h and slower (skip 1m, 5m, 15m - fastest iteration)
+SPEED_TIMEFRAMES = {
+    "NORMAL": ["1m", "5m", "15m", "1h", "4h", "1d"],
+    "TURBO": ["15m", "1h", "4h", "1d"],  # Skip 1m, 5m
+    "HYPERSPEED": ["1h", "4h", "1d"],  # Skip 1m, 5m, 15m
+}
+
+# Current speed mode (module-level state)
+_BACKTEST_SPEED: str = "TURBO"  # Default to TURBO for faster iteration
+
+
+def set_backtest_speed(mode: str) -> str:
+    """
+    Set the backtest speed mode.
+
+    Args:
+        mode: "NORMAL", "TURBO", or "HYPERSPEED"
+
+    Returns:
+        The mode that was set (normalized to uppercase)
+    """
+    global _BACKTEST_SPEED
+    mode = mode.upper()
+    if mode not in SPEED_TIMEFRAMES:
+        raise ValueError(f"Invalid speed mode: {mode}. Must be one of: {list(SPEED_TIMEFRAMES.keys())}")
+    _BACKTEST_SPEED = mode
+    print(f"[Windows] Backtest speed set to {mode} (timeframes: {SPEED_TIMEFRAMES[mode]})")
+    return mode
+
+
+def get_backtest_speed() -> str:
+    """Get the current backtest speed mode."""
+    return _BACKTEST_SPEED
+
+
+def get_allowed_timeframes() -> list[str]:
+    """Get the list of allowed timeframes for the current speed mode."""
+    return SPEED_TIMEFRAMES.get(_BACKTEST_SPEED, TIMEFRAMES)
+
 
 # Window duration ranges in days (max = 6x min)
 WINDOW_DURATION_DAYS = {
@@ -157,8 +220,7 @@ async def refresh_data_ranges(conn_string: str = None) -> dict[tuple[str, str], 
         _DATA_RANGES = {
             (row.symbol, row.timeframe): (row.start_ts, row.end_ts)
             for row in rows
-            if row.start_ts is not None and row.end_ts is not None
-            and row.timeframe != "6h"  # Skip 6h - sparse data
+            if row.start_ts is not None and row.end_ts is not None and row.timeframe != "6h"  # Skip 6h - sparse data
         }
         _LAST_REFRESH = datetime.now()
         return _DATA_RANGES
@@ -331,7 +393,12 @@ def generate_pool(seed: int = 42) -> list[Window]:
 
 def get_windows(count: int = 10, seed: int = None) -> list[Window]:
     """
-    Get windows from pool.
+    Get windows from pool, filtered by current speed mode.
+
+    Speed modes filter out fast timeframes:
+    - NORMAL: all timeframes
+    - TURBO: 15m and slower (skip 1m, 5m)
+    - HYPERSPEED: 1h and slower (skip 1m, 5m, 15m)
 
     Args:
         count: Number of windows to return
@@ -346,22 +413,32 @@ def get_windows(count: int = 10, seed: int = None) -> list[Window]:
     if seed is not None:
         random.seed(seed)
 
-    return random.sample(_POOL, min(count, len(_POOL)))
+    # Filter by current speed mode
+    allowed_tf = get_allowed_timeframes()
+    candidates = [w for w in _POOL if w.timeframe in allowed_tf]
+
+    if not candidates:
+        print(f"[Windows] WARNING: No windows for speed mode {_BACKTEST_SPEED} (allowed: {allowed_tf})")
+        return []
+
+    return random.sample(candidates, min(count, len(candidates)))
 
 
 def get_windows_for_symbol(symbol: str, count: int = 5) -> list[Window]:
-    """Get windows for a specific symbol."""
+    """Get windows for a specific symbol, filtered by current speed mode."""
     if not _POOL:
         raise RuntimeError("Pool not generated. Call generate_pool() or initialize() first.")
 
-    candidates = [w for w in _POOL if w.symbol == symbol]
+    # Filter by symbol AND speed mode
+    allowed_tf = get_allowed_timeframes()
+    candidates = [w for w in _POOL if w.symbol == symbol and w.timeframe in allowed_tf]
     if not candidates:
         return []
     return random.sample(candidates, min(count, len(candidates)))
 
 
 def get_windows_for_timeframe(timeframe: str, count: int = 5) -> list[Window]:
-    """Get windows for a specific timeframe."""
+    """Get windows for a specific timeframe (ignores speed mode - explicit timeframe request)."""
     if not _POOL:
         raise RuntimeError("Pool not generated. Call generate_pool() or initialize() first.")
 
@@ -376,13 +453,20 @@ def get_pool_stats() -> dict:
     if not _POOL:
         return {"initialized": False, "pool_size": 0}
 
-    symbols = set(w.symbol for w in _POOL)
-    timeframes = set(w.timeframe for w in _POOL)
+    symbols = {w.symbol for w in _POOL}
+    timeframes = {w.timeframe for w in _POOL}
 
     # Count by timeframe
     tf_counts = {}
     for tf in timeframes:
         tf_counts[tf] = sum(1 for w in _POOL if w.timeframe == tf)
+
+    # Calculate effective pool size (filtered by speed mode)
+    allowed_tf = get_allowed_timeframes()
+    effective_pool = [w for w in _POOL if w.timeframe in allowed_tf]
+    effective_tf_counts = {}
+    for tf in allowed_tf:
+        effective_tf_counts[tf] = sum(1 for w in effective_pool if w.timeframe == tf)
 
     return {
         "initialized": True,
@@ -394,6 +478,11 @@ def get_pool_stats() -> dict:
         "windows_by_timeframe": tf_counts,
         "data_ranges_count": len(_DATA_RANGES),
         "last_refresh": _LAST_REFRESH.isoformat() if _LAST_REFRESH else None,
+        # Speed mode info
+        "speed_mode": _BACKTEST_SPEED,
+        "allowed_timeframes": allowed_tf,
+        "effective_pool_size": len(effective_pool),
+        "effective_windows_by_timeframe": effective_tf_counts,
     }
 
 
@@ -489,7 +578,7 @@ def verify_coverage(sample_points: int = 500) -> dict:
 async def _load_pool_from_db(conn_string: str = None, seed: int = 42, max_data_ts: int | None = None) -> bool:
     """
     Load cached window pool from database if valid.
-    
+
     Returns True if successfully loaded, False if cache miss or invalid.
     Cache is invalidated if seed or data timestamp changed.
     """
@@ -502,12 +591,14 @@ async def _load_pool_from_db(conn_string: str = None, seed: int = 42, max_data_t
         async with async_session_maker() as session:
             # Check if we have any cached windows
             result = await session.execute(
-                select(BacktestWindow).where(
+                select(BacktestWindow)
+                .where(
                     and_(
                         BacktestWindow.pool_seed == seed,
-                        BacktestWindow.data_max_ts == max_data_ts  # Invalidate if data changed
+                        BacktestWindow.data_max_ts == max_data_ts,  # Invalidate if data changed
                     )
-                ).limit(1)
+                )
+                .limit(1)
             )
             row = result.first()
 
@@ -517,10 +608,7 @@ async def _load_pool_from_db(conn_string: str = None, seed: int = 42, max_data_t
             # Load all windows
             result = await session.execute(
                 select(BacktestWindow).where(
-                    and_(
-                        BacktestWindow.pool_seed == seed,
-                        BacktestWindow.data_max_ts == max_data_ts
-                    )
+                    and_(BacktestWindow.pool_seed == seed, BacktestWindow.data_max_ts == max_data_ts)
                 )
             )
             rows = result.fetchall()
@@ -560,7 +648,7 @@ async def _save_pool_to_db(conn_string: str = None, seed: int = 42, max_data_ts:
             # Clear old cached windows with different seed/data_ts
             await session.execute(
                 text("DELETE FROM backtest_windows WHERE pool_seed != :seed OR data_max_ts != :data_ts"),
-                {"seed": seed, "data_ts": max_data_ts}
+                {"seed": seed, "data_ts": max_data_ts},
             )
             await session.commit()
 
@@ -593,9 +681,7 @@ async def _get_max_data_timestamp(conn_string: str = None) -> int:
         from Fast_Swarm.Database import async_session_maker
 
         async with async_session_maker() as session:
-            result = await session.execute(
-                text("SELECT EXTRACT(EPOCH FROM MAX(time)) * 1000 FROM enhanced_candles")
-            )
+            result = await session.execute(text("SELECT EXTRACT(EPOCH FROM MAX(time)) * 1000 FROM enhanced_candles"))
             max_ts = result.scalar()
             return int(max_ts) if max_ts else 0
 
@@ -607,16 +693,29 @@ async def _get_max_data_timestamp(conn_string: str = None) -> int:
 async def initialize(conn_string: str = None, seed: int = 42):
     """
     Initialize the window pool (call at startup).
-    
+
     Uses cached windows from database if available, otherwise generates and caches them.
     Cache is validated against current data timestamp to detect stale data.
-    
+
     On cache hit, automatically extends pool if coverage verification fails.
+
+    Environment variables:
+        BACKTEST_SPEED: Set to "NORMAL", "TURBO", or "HYPERSPEED" (default: TURBO)
 
     Args:
         conn_string: PostgreSQL connection string
         seed: Random seed for reproducibility
     """
+    import os
+
+    # Check for speed mode from environment variable
+    env_speed = os.environ.get("BACKTEST_SPEED", "").upper()
+    if env_speed and env_speed in SPEED_TIMEFRAMES:
+        set_backtest_speed(env_speed)
+    else:
+        # Default to TURBO for faster iteration during development
+        print(f"[Windows] Using default speed mode: {_BACKTEST_SPEED} (set BACKTEST_SPEED env var to change)")
+
     print("[Startup] Initializing backtest window pool...")
 
     # Get current max data timestamp

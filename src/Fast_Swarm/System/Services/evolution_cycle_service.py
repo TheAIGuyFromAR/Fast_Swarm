@@ -175,6 +175,28 @@ class EvolutionCycleService:
             "avg_fitness": sum(float(r["fitness_score"] or 0) for r in rankings) / len(rankings) if rankings else 0,
         }
 
+        # Phase 2.5: Level increment for top 10 agents (+2 levels each)
+        # This rewards consistently high performers regardless of reproduction
+        print("[EvolutionCycle] Phase 2.5: Incrementing levels for top 10 agents...")
+        all_agents_for_leveling = await self.agent_ranking.get_all_agents_ranked(session=session)
+        top_10_agents = all_agents_for_leveling[:10]
+        leveled_agents = []
+
+        for agent in top_10_agents:
+            old_level = agent.level or 1
+            agent.level = old_level + 2
+            session.add(agent)
+            leveled_agents.append({"agent_id": agent.agent_id, "old_level": old_level, "new_level": agent.level})
+
+        await session.commit()
+        print(f"[EvolutionCycle] Leveled up {len(leveled_agents)} agents (+2 each)")
+
+        results["phases"]["level_increment"] = {
+            "agents_leveled": len(leveled_agents),
+            "level_increase": 2,
+            "agents": leveled_agents[:5],  # Sample
+        }
+
         # Phase 3: Breeding - Top 10 agents produce 5 crossover children
         print("[EvolutionCycle] Phase 3: Breeding top 10 agents...")
         all_agents_ranked = await self.agent_ranking.get_all_agents_ranked(session=session)
@@ -362,6 +384,55 @@ class EvolutionCycleService:
         results["cycle_end"] = cycle_end.isoformat()
         results["duration_seconds"] = (cycle_end - cycle_start).total_seconds()
         results["final_population"] = final_stats
+
+        # Phase 6: Crucible Eligibility Check
+        # Check all agents that leveled up or were created this cycle for Crucible eligibility
+        print("[EvolutionCycle] Phase 6: Checking Crucible eligibility...")
+        from .crucible_entry_service import CrucibleEntryService
+
+        crucible_service = CrucibleEntryService()
+
+        # Check the agents that just leveled up (most likely to be eligible)
+        leveled_agent_ids = [a["agent_id"] for a in leveled_agents]
+        crucible_entries = await crucible_service.check_agents_batch(session, leveled_agent_ids)
+
+        results["phases"]["crucible"] = {
+            "agents_checked": len(leveled_agent_ids),
+            "entries_created": len(crucible_entries),
+            "new_entries": [
+                {"agent_id": e.agent_id, "level": e.level_at_entry}
+                for e in crucible_entries
+            ],
+        }
+
+        if crucible_entries:
+            print(f"[EvolutionCycle] {len(crucible_entries)} agents entered the Crucible!")
+
+            # Run crucible tests as background tasks (don't block evolution cycle)
+            import asyncio
+
+            from .crucible_test_service import CrucibleTestService
+            from Fast_Swarm.Database import get_session
+
+            crucible_test_service = CrucibleTestService()
+
+            async def _run_crucible_test_background(entry_id: int):
+                """Run a single crucible test with its own session."""
+                try:
+                    async for test_session in get_session():
+                        result = await crucible_test_service.run_crucible_test(
+                            test_session, entry_id
+                        )
+                        print(
+                            f"[Crucible] Test for entry {entry_id}: "
+                            f"{result.get('status', 'unknown')} "
+                            f"(fitness={result.get('overall_fitness', 'N/A')})"
+                        )
+                except Exception as e:
+                    print(f"[Crucible] Background test failed for entry {entry_id}: {e}")
+
+            for entry in crucible_entries:
+                asyncio.create_task(_run_crucible_test_background(entry.id))
 
         return results
 

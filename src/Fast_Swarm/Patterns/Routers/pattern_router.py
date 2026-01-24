@@ -83,6 +83,7 @@ async def get_pattern_leaderboard(
                 fitness_score=float(p.fitness_score) if p.fitness_score else None,
                 total_roi_pct=float(p.total_roi_pct) if p.total_roi_pct else None,
                 sharpe_ratio=p.sharpe_ratio,
+                sortino_ratio=p.sortino_ratio,
                 win_rate=p.win_rate,
                 profit_factor=p.profit_factor,
                 max_drawdown_pct=p.max_drawdown_pct,
@@ -264,6 +265,154 @@ async def run_pattern_backtest(
     service = PatternDiscoveryService()
     result = await service.run_batch_backtest(session, batch_size=batch_size, priority_filter=priority)
     return result
+
+
+@router.post("/cull")
+async def cull_weak_patterns(session: AsyncSession = Depends(get_session)):
+    """
+    Cull patterns with 100+ trades and weak bottom-3 regime fitness.
+
+    A pattern is culled if:
+    - It has at least 100 total trades (sufficient sample size)
+    - It has fitness_by_regime data with at least 3 regimes
+    - The average fitness of its worst 3 regimes is below 20.0
+
+    Culled patterns have status set to 'culled' and is_active set to False.
+    """
+    result = await session.execute(
+        select(Pattern).where(Pattern.status != "archived").where(Pattern.status != "culled")
+    )
+    patterns = result.scalars().all()
+    culled = []
+
+    for p in patterns:
+        # Must have 100+ backtest trades to be eligible
+        total_tests = p.total_trades or 0
+        if total_tests < 100:
+            continue
+
+        # Check regime fitness scores
+        fbr = p.fitness_by_regime or {}
+        if len(fbr) < 3:
+            continue
+
+        # Get numeric scores from regime fitness dict
+        scores = []
+        for val in fbr.values():
+            if isinstance(val, (int, float)):
+                scores.append(val)
+            elif isinstance(val, dict):
+                score = val.get("fitness", 0)
+                if isinstance(score, (int, float)):
+                    scores.append(score)
+
+        if len(scores) < 3:
+            continue
+
+        scores.sort()
+        bottom_3_avg = sum(scores[:3]) / 3
+
+        # If average of worst 3 regimes is below 20, cull it
+        if bottom_3_avg < 20.0:
+            p.status = "culled"
+            p.is_active = False
+            session.add(p)
+            culled.append(p.pattern_id)
+
+    if culled:
+        await session.commit()
+
+    return {"culled_count": len(culled), "culled_ids": culled}
+
+
+@router.get("/validation")
+async def get_invalid_patterns(
+    session: AsyncSession = Depends(get_session),
+):
+    """
+    Get patterns flagged with unresolvable indicators.
+
+    Returns patterns that can never generate trades because they reference
+    indicators that don't exist (e.g., hold_candles, mswSine).
+    Use this to review and fix/delete broken patterns.
+    """
+    from sqlalchemy import text as sa_text
+
+    result = await session.execute(
+        select(Pattern)
+        .where(sa_text("validation_issues->>'status' = 'invalid'"))
+        .order_by(Pattern.created_at.desc())
+    )
+    patterns = result.scalars().all()
+
+    return [
+        {
+            "pattern_id": p.pattern_id,
+            "name": p.name,
+            "origin": p.origin,
+            "unresolvable": (p.validation_issues or {}).get("unresolvable", []),
+            "validated_at": (p.validation_issues or {}).get("validated_at"),
+            "entry_conditions": p.entry_conditions,
+            "created_at": p.created_at.isoformat() if p.created_at else None,
+        }
+        for p in patterns
+    ]
+
+
+@router.delete("/validation/{pattern_id}")
+async def delete_invalid_pattern(
+    pattern_id: str,
+    session: AsyncSession = Depends(get_session),
+):
+    """
+    Delete a pattern flagged as invalid (unresolvable indicators).
+    """
+    pattern = await pattern_service.get_pattern_by_id(session, pattern_id)
+    if not pattern:
+        raise HTTPException(status_code=404, detail="Pattern not found")
+
+    vi = pattern.validation_issues or {}
+    if vi.get("status") != "invalid":
+        raise HTTPException(status_code=400, detail="Pattern is not flagged as invalid")
+
+    await session.delete(pattern)
+    await session.commit()
+    return {"deleted": pattern_id, "unresolvable": vi.get("unresolvable", [])}
+
+
+@router.post("/validation/revalidate")
+async def revalidate_all_patterns(
+    session: AsyncSession = Depends(get_session),
+):
+    """
+    Re-run validation on all patterns (clears previous flags and re-checks).
+    Useful after adding new indicator aliases.
+    """
+    from Fast_Swarm.local_agents.backtest.pattern_matcher import validate_pattern_conditions
+
+    result = await session.execute(
+        select(Pattern).where(Pattern.is_active.is_(True))
+    )
+    patterns = result.scalars().all()
+
+    flagged = 0
+    cleared = 0
+    for p in patterns:
+        validation = validate_pattern_conditions(p.entry_conditions or [])
+        old_status = (p.validation_issues or {}).get("status")
+        p.validation_issues = validation
+        session.add(p)
+        if validation["status"] == "invalid":
+            flagged += 1
+        elif old_status == "invalid":
+            cleared += 1
+
+    await session.commit()
+    return {
+        "total_checked": len(patterns),
+        "flagged_invalid": flagged,
+        "cleared": cleared,
+    }
 
 
 @router.get("/{pattern_id}", response_model=Pattern)

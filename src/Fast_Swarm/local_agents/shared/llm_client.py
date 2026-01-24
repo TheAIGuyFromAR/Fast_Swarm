@@ -14,9 +14,11 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from enum import Enum
 
 from Fast_Swarm.local_agents.config import Config
+from Fast_Swarm.local_agents.shared.llm_logger import LLMResponseRecord, log_llm_response
 
 # Try to import the new ML layer (optional)
 try:
@@ -44,7 +46,6 @@ class AIZoneMode(Enum):
     """Modes for handling AI_REFLECT zone decisions."""
 
     SKIP = "skip"  # Treat as SKIP (fast backtesting)
-    HEURISTIC = "heuristic"  # Use trait-based heuristics (legacy V3 style)
     LLM = "llm"  # Real Ollama calls (slower, CPU-friendly)
     VLLM = "vllm"  # vLLM with prefix caching (fast, GPU-optimized)
     UNIFIED = "unified"  # Use new ML layer UnifiedTradingInference
@@ -113,50 +114,27 @@ class OllamaClient:
         except Exception:
             return []
 
-    async def generate(
+    def _do_request(
         self,
-        prompt: str,
-        system: str | None = None,
-        temperature: float = 0.7,
-        max_tokens: int = 500,
+        payload: dict,
         json_mode: bool = False,
     ) -> LLMResponse:
         """
-        Generate completion from Ollama.
+        Perform blocking HTTP request to Ollama (sync).
+
+        This is the actual I/O — extracted so it can be called directly (sync)
+        or wrapped in asyncio.to_thread (async).
 
         Args:
-            prompt: User prompt.
-            system: Optional system prompt.
-            temperature: Sampling temperature (0-1).
-            max_tokens: Maximum tokens to generate.
-            json_mode: If True, expect JSON response.
+            payload: Request payload dict.
+            json_mode: If True, attempt JSON parsing of response.
 
         Returns:
-            LLMResponse with content and parsed JSON if applicable.
+            LLMResponse with content and optional parsed JSON.
         """
         start_time = time.time()
-
-        # Build request payload with GPU optimization
-        payload = {
-            "model": self.model,
-            "prompt": prompt,
-            "stream": False,
-            "options": {
-                "temperature": temperature,
-                "num_predict": max_tokens,
-                "num_gpu": getattr(Config, "OLLAMA_NUM_GPU", 99),
-                "num_ctx": getattr(Config, "OLLAMA_NUM_CTX", 512),
-            },
-        }
-
-        if system:
-            payload["system"] = system
-
-        if json_mode:
-            payload["format"] = "json"
-
-        # Try with retries
         last_error = None
+
         for attempt in range(self.max_retries):
             try:
                 req = urllib.request.Request(
@@ -178,7 +156,6 @@ class OllamaClient:
                         try:
                             parsed = json.loads(content)
                         except json.JSONDecodeError:
-                            # Try to extract JSON from content
                             parsed = self._extract_json(content)
 
                     return LLMResponse(
@@ -196,9 +173,9 @@ class OllamaClient:
             except Exception as e:
                 last_error = str(e)
 
-            # Wait before retry (non-blocking)
+            # Blocking retry delay (OK — this runs in a thread or sync context)
             if attempt < self.max_retries - 1:
-                await asyncio.sleep(1 * (attempt + 1))
+                time.sleep(1 * (attempt + 1))
 
         latency_ms = int((time.time() - start_time) * 1000)
         return LLMResponse(
@@ -208,6 +185,75 @@ class OllamaClient:
             latency_ms=latency_ms,
             model=self.model,
         )
+
+    def _build_payload(
+        self,
+        prompt: str,
+        system: str | None = None,
+        temperature: float = 0.7,
+        max_tokens: int = 500,
+        json_mode: bool = False,
+    ) -> dict:
+        """Build request payload for Ollama."""
+        payload = {
+            "model": self.model,
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "temperature": temperature,
+                "num_predict": max_tokens,
+                "num_gpu": getattr(Config, "OLLAMA_NUM_GPU", 99),
+                "num_ctx": getattr(Config, "OLLAMA_NUM_CTX", 512),
+            },
+        }
+        if system:
+            payload["system"] = system
+        if json_mode:
+            payload["format"] = "json"
+        return payload
+
+    def generate_sync(
+        self,
+        prompt: str,
+        system: str | None = None,
+        temperature: float = 0.7,
+        max_tokens: int = 500,
+        json_mode: bool = False,
+    ) -> LLMResponse:
+        """
+        Generate completion synchronously (blocking).
+
+        Use from sync code (backtests, warmup, etc.).
+        """
+        payload = self._build_payload(prompt, system, temperature, max_tokens, json_mode)
+        return self._do_request(payload, json_mode=json_mode)
+
+    async def generate(
+        self,
+        prompt: str,
+        system: str | None = None,
+        temperature: float = 0.7,
+        max_tokens: int = 500,
+        json_mode: bool = False,
+    ) -> LLMResponse:
+        """
+        Generate completion asynchronously (non-blocking).
+
+        Wraps blocking urllib I/O in asyncio.to_thread so the event loop
+        is not blocked. Use from async code (paper trading, FastAPI handlers).
+
+        Args:
+            prompt: User prompt.
+            system: Optional system prompt.
+            temperature: Sampling temperature (0-1).
+            max_tokens: Maximum tokens to generate.
+            json_mode: If True, expect JSON response.
+
+        Returns:
+            LLMResponse with content and parsed JSON if applicable.
+        """
+        payload = self._build_payload(prompt, system, temperature, max_tokens, json_mode)
+        return await asyncio.to_thread(self._do_request, payload, json_mode)
 
     def _extract_json(self, text: str) -> dict | None:
         """Try to extract JSON from text content."""
@@ -368,8 +414,8 @@ class AIZoneHandler:
 
     Modes:
     - SKIP: Always skip (fast backtesting)
-    - HEURISTIC: Use entry_aggression trait (legacy behavior)
-    - LLM: Call Ollama for decision
+    - LLM: Call Ollama for decision (CPU-friendly)
+    - VLLM: vLLM with prefix caching (GPU-optimized, see VLLMAIZoneHandler)
     - UNIFIED: Use new ML layer UnifiedTradingInference
     """
 
@@ -415,7 +461,7 @@ class AIZoneHandler:
 
     def warmup(self) -> bool:
         """
-        Warm up the LLM by making a test call.
+        Warm up the LLM by making a sync test call.
 
         This loads the model into GPU memory for faster subsequent calls.
         Returns True if warmup successful.
@@ -443,8 +489,8 @@ class AIZoneHandler:
         if not self.client.is_available():
             return False
 
-        # Make a test call to load the model
-        response = self.client.generate(
+        # Sync test call to load model into GPU memory
+        response = self.client.generate_sync(
             prompt='{"test":true} TAKE or SKIP?',
             max_tokens=10,
             json_mode=False,
@@ -453,6 +499,43 @@ class AIZoneHandler:
         if response.success:
             self._warmed_up = True
             print(f"[AIZoneHandler] Warmed up in {response.latency_ms}ms")
+
+        return response.success
+
+    async def warmup_async(self) -> bool:
+        """
+        Warm up the LLM asynchronously (non-blocking).
+
+        Use from async contexts (FastAPI lifespan, paper trading init).
+        """
+        if self._warmed_up:
+            return True
+
+        if self.mode not in (AIZoneMode.LLM, AIZoneMode.VLLM, AIZoneMode.UNIFIED):
+            self._warmed_up = True
+            return True
+
+        if self.mode == AIZoneMode.UNIFIED:
+            if self._ml_inference:
+                try:
+                    latency = self._ml_inference.warmup()
+                    self._warmed_up = True
+                    return True
+                except Exception:
+                    return False
+            return False
+
+        if not self.client.is_available():
+            return False
+
+        response = await self.client.generate(
+            prompt='{"test":true} TAKE or SKIP?',
+            max_tokens=10,
+            json_mode=False,
+        )
+
+        if response.success:
+            self._warmed_up = True
 
         return response.success
 
@@ -480,15 +563,36 @@ class AIZoneHandler:
         if self.mode == AIZoneMode.SKIP:
             return False, "AI zone treated as skip", False
 
-        elif self.mode == AIZoneMode.HEURISTIC:
-            # Legacy behavior: use entry_aggression
-            entry_agg = traits.get("entry_aggression", 0.5)
-            should_trade = entry_agg >= 0.5
-            reasoning = f"Heuristic: entry_aggression={entry_agg:.2f}"
-            return should_trade, reasoning, False
-
         elif self.mode == AIZoneMode.LLM:
             return self._decide_with_llm(confidence, pattern_name, indicators, traits, recent_trades)
+
+        elif self.mode == AIZoneMode.UNIFIED:
+            return self._decide_with_ml_layer(confidence, pattern_name, indicators, traits)
+
+        return False, f"Unknown mode: {self.mode}", False
+
+    async def decide_async(
+        self,
+        confidence: float,
+        pattern_name: str,
+        indicators: dict[str, float],
+        traits: dict[str, float],
+        recent_trades: list[dict] | None = None,
+    ) -> tuple[bool, str, bool]:
+        """
+        Make AI zone decision asynchronously (non-blocking).
+
+        Use from async contexts (paper trading, FastAPI handlers).
+        Same interface as decide() but awaits LLM calls properly.
+
+        Returns:
+            Tuple of (should_trade, reasoning, ai_consulted).
+        """
+        if self.mode == AIZoneMode.SKIP:
+            return False, "AI zone treated as skip", False
+
+        elif self.mode == AIZoneMode.LLM:
+            return await self._decide_with_llm_async(confidence, pattern_name, indicators, traits, recent_trades)
 
         elif self.mode == AIZoneMode.UNIFIED:
             return self._decide_with_ml_layer(confidence, pattern_name, indicators, traits)
@@ -573,14 +677,11 @@ class AIZoneHandler:
         traits: dict[str, float],
         recent_trades: list[dict] | None,
     ) -> tuple[bool, str, bool]:
-        """Make decision using LLM."""
-        # Check if Ollama is available
+        """Make decision using LLM (sync — uses generate_sync)."""
         if not self.client.is_available():
-            # Fall back to heuristic
             entry_agg = traits.get("entry_aggression", 0.5)
             return entry_agg >= 0.5, "LLM unavailable, used heuristic", False
 
-        # Build prompt (minimal for speed)
         prompt = build_ai_zone_prompt(
             confidence=confidence,
             pattern_name=pattern_name,
@@ -590,31 +691,26 @@ class AIZoneHandler:
             minimal=self.use_minimal_prompts,
         )
 
-        # Use minimal system prompt for fast models
         system = AI_ZONE_SYSTEM_PROMPT_MINIMAL if self.use_minimal_prompts else AI_ZONE_SYSTEM_PROMPT
         max_tokens = 50 if self.use_minimal_prompts else 150
 
-        # Call LLM
-        response = self.client.generate(
+        response = self.client.generate_sync(
             prompt=prompt,
             system=system,
-            temperature=0.1,  # Very low for consistent decisions
+            temperature=0.1,
             max_tokens=max_tokens,
             json_mode=True,
         )
 
         if not response.success:
-            # Fall back to heuristic on error
             entry_agg = traits.get("entry_aggression", 0.5)
             return entry_agg >= 0.5, f"LLM error: {response.error}", False
 
-        # Parse response
         if response.parsed:
             decision = response.parsed.get("decision", "").upper()
             reasoning = response.parsed.get("reasoning", "No reasoning provided")
             should_trade = decision == "TAKE"
 
-            # Track decision
             self._decisions.append(
                 {
                     "confidence": confidence,
@@ -624,9 +720,114 @@ class AIZoneHandler:
                 }
             )
 
+            log_llm_response(LLMResponseRecord(
+                timestamp=datetime.now(timezone.utc),
+                agent_id=None,
+                pattern_name=pattern_name,
+                confidence=confidence,
+                raw_content=response.content,
+                parsed_successfully=True,
+                parsed_decision=decision,
+                reasoning=reasoning,
+                latency_ms=response.latency_ms,
+                model=response.model,
+            ))
+
             return should_trade, reasoning, True
 
-        # Couldn't parse response, fall back
+        log_llm_response(LLMResponseRecord(
+            timestamp=datetime.now(timezone.utc),
+            agent_id=None,
+            pattern_name=pattern_name,
+            confidence=confidence,
+            raw_content=response.content,
+            parsed_successfully=False,
+            parsed_decision=None,
+            reasoning=None,
+            latency_ms=response.latency_ms,
+            model=response.model,
+        ))
+        entry_agg = traits.get("entry_aggression", 0.5)
+        return entry_agg >= 0.5, "Could not parse LLM response", False
+
+    async def _decide_with_llm_async(
+        self,
+        confidence: float,
+        pattern_name: str,
+        indicators: dict[str, float],
+        traits: dict[str, float],
+        recent_trades: list[dict] | None,
+    ) -> tuple[bool, str, bool]:
+        """Make decision using LLM (async — uses generate with asyncio.to_thread)."""
+        if not self.client.is_available():
+            entry_agg = traits.get("entry_aggression", 0.5)
+            return entry_agg >= 0.5, "LLM unavailable, used heuristic", False
+
+        prompt = build_ai_zone_prompt(
+            confidence=confidence,
+            pattern_name=pattern_name,
+            indicators=indicators,
+            traits=traits,
+            recent_trades=recent_trades,
+            minimal=self.use_minimal_prompts,
+        )
+
+        system = AI_ZONE_SYSTEM_PROMPT_MINIMAL if self.use_minimal_prompts else AI_ZONE_SYSTEM_PROMPT
+        max_tokens = 50 if self.use_minimal_prompts else 150
+
+        response = await self.client.generate(
+            prompt=prompt,
+            system=system,
+            temperature=0.1,
+            max_tokens=max_tokens,
+            json_mode=True,
+        )
+
+        if not response.success:
+            entry_agg = traits.get("entry_aggression", 0.5)
+            return entry_agg >= 0.5, f"LLM error: {response.error}", False
+
+        if response.parsed:
+            decision = response.parsed.get("decision", "").upper()
+            reasoning = response.parsed.get("reasoning", "No reasoning provided")
+            should_trade = decision == "TAKE"
+
+            self._decisions.append(
+                {
+                    "confidence": confidence,
+                    "pattern": pattern_name,
+                    "decision": decision,
+                    "latency_ms": response.latency_ms,
+                }
+            )
+
+            log_llm_response(LLMResponseRecord(
+                timestamp=datetime.now(timezone.utc),
+                agent_id=None,
+                pattern_name=pattern_name,
+                confidence=confidence,
+                raw_content=response.content,
+                parsed_successfully=True,
+                parsed_decision=decision,
+                reasoning=reasoning,
+                latency_ms=response.latency_ms,
+                model=response.model,
+            ))
+
+            return should_trade, reasoning, True
+
+        log_llm_response(LLMResponseRecord(
+            timestamp=datetime.now(timezone.utc),
+            agent_id=None,
+            pattern_name=pattern_name,
+            confidence=confidence,
+            raw_content=response.content,
+            parsed_successfully=False,
+            parsed_decision=None,
+            reasoning=None,
+            latency_ms=response.latency_ms,
+            model=response.model,
+        ))
         entry_agg = traits.get("entry_aggression", 0.5)
         return entry_agg >= 0.5, "Could not parse LLM response", False
 
@@ -650,7 +851,7 @@ class AIZoneHandler:
 
 def call_ollama(prompt: str, system: str | None = None) -> str:
     """
-    Simple function to call Ollama.
+    Simple function to call Ollama (sync).
 
     For use with llm_call parameter in spawn_agent, etc.
 
@@ -662,7 +863,7 @@ def call_ollama(prompt: str, system: str | None = None) -> str:
         Response content string.
     """
     client = OllamaClient()
-    response = client.generate(prompt=prompt, system=system)
+    response = client.generate_sync(prompt=prompt, system=system)
     return response.content if response.success else ""
 
 

@@ -5,18 +5,38 @@ Computes 6 orders of motion derivatives (velocity, acceleration, jerk, snap, cra
 for every indicator across all assets and timeframes in the enhanced_candles table.
 
 Uses Pascal's triangle with alternating signs for finite difference coefficients:
-- Velocity:     [1, -1]                         (2 candles)
-- Acceleration: [1, -2, 1]                      (3 candles)
-- Jerk:         [1, -3, 3, -1]                  (4 candles)
-- Snap:         [1, -4, 6, -4, 1]               (5 candles)
-- Crackle:      [1, -5, 10, -10, 5, -1]         (6 candles)
-- Pop:          [1, -6, 15, -20, 15, -6, 1]     (7 candles)
+- Velocity:     [1, -1]                         (2 candles) - Rate of change
+- Acceleration: [1, -2, 1]                      (3 candles) - Change in velocity
+- Jerk:         [1, -3, 3, -1]                  (4 candles) - Change in acceleration
+- Snap:         [1, -4, 6, -4, 1]               (5 candles) - Change in jerk
+- Crackle:      [1, -5, 10, -10, 5, -1]         (6 candles) - Change in snap
+- Pop:          [1, -6, 15, -20, 15, -6, 1]     (7 candles) - Change in crackle
+
+HIGHER-ORDER DERIVATIVES (Snap, Crackle, Pop) - THE NOVEL PART:
+
+Jerk (3rd derivative) already exists as the "Rate of Change" indicator in TradingView.
+But snap, crackle, and pop (4th-6th derivatives) are UNEXPLORED in trading.
+
+Physical meaning:
+- SNAP: How quickly is jerk changing? If jerk detects regime shifts,
+        snap detects when those shifts are ACCELERATING. A positive snap
+        when jerk is positive means the momentum change is strengthening.
+
+- CRACKLE: The "second derivative of jerk". Detects inflection points in
+           regime changes. When crackle flips sign, snap is at an extremum.
+           This is 2 steps ahead of where most traders are looking.
+
+- POP: The subtlest signal. Detects changes in the rate of crackle.
+       Highly sensitive but also noisier. Best used as confirmation
+       or for detecting structural shifts in market microstructure.
+
+Hypothesis: Higher-order derivatives may detect regime changes BEFORE
+they become visible in price, like ripples on water before a wave arrives.
 
 Output: Partitioned Parquet files in data/derivatives/symbol=X/timeframe=Y/
 Checkpoint: JSONL file for restart capability
 
 Author: Coinswarm Research
-Paper: "Snap, Crackle, Pop: Higher-Order Derivatives as Leading Indicators"
 """
 
 import asyncio
@@ -121,15 +141,25 @@ async def get_engine():
 # CHECKPOINT SYSTEM
 # =============================================================================
 
-def load_checkpoint() -> dict[str, dict[str, str]]:
-    """Load last processed time per (symbol, timeframe) from checkpoint file."""
+def load_checkpoint() -> dict[str, dict[str, datetime]]:
+    """Load last processed time per (symbol, timeframe) from checkpoint file.
+
+    Returns datetime objects (not strings) for asyncpg compatibility.
+    """
     checkpoint = {}
     if CHECKPOINT_FILE.exists():
         with open(CHECKPOINT_FILE) as f:
             for line in f:
                 if line.strip():
                     rec = json.loads(line)
-                    checkpoint.setdefault(rec["symbol"], {})[rec["timeframe"]] = rec["last_time"]
+                    # Parse ISO string to datetime for asyncpg compatibility
+                    last_time_str = rec["last_time"]
+                    if isinstance(last_time_str, str):
+                        # Handle ISO format with timezone
+                        last_time = datetime.fromisoformat(last_time_str.replace("Z", "+00:00"))
+                    else:
+                        last_time = last_time_str
+                    checkpoint.setdefault(rec["symbol"], {})[rec["timeframe"]] = last_time
     return checkpoint
 
 
@@ -146,7 +176,7 @@ def save_checkpoint(symbol: str, timeframe: str, last_time: datetime, rows: int)
         }) + "\n")
 
 
-def get_last_checkpoint_time(checkpoint: dict, symbol: str, timeframe: str) -> str | None:
+def get_last_checkpoint_time(checkpoint: dict, symbol: str, timeframe: str) -> datetime | None:
     """Get last processed time for symbol/timeframe, or None if not processed."""
     return checkpoint.get(symbol, {}).get(timeframe)
 
@@ -185,18 +215,25 @@ def compute_derivatives_for_series(values: np.ndarray) -> dict[str, np.ndarray]:
 
 
 def compute_zscore_rolling(values: np.ndarray, window: int = ZSCORE_WINDOW) -> np.ndarray:
-    """Compute rolling z-score normalization."""
+    """
+    Compute rolling z-score normalization.
+
+    Note: This is O(n × window) - the slowest part of the computation.
+    For 300K candles this takes ~1-2 seconds per derivative column.
+    """
     n = len(values)
     result = np.full(n, np.nan)
 
-    for i in range(window, n):
-        window_data = values[i - window:i]
-        valid = window_data[~np.isnan(window_data)]
-        if len(valid) > 1:
-            mean = np.mean(valid)
-            std = np.std(valid)
-            if std > 0:
-                result[i] = (values[i] - mean) / std
+    # Use vectorized rolling mean/std for speed
+    # pandas rolling is much faster than manual loop
+    import pandas as pd
+    series = pd.Series(values)
+    rolling_mean = series.rolling(window=window, min_periods=2).mean()
+    rolling_std = series.rolling(window=window, min_periods=2).std()
+
+    # Compute z-score where std > 0
+    mask = rolling_std > 0
+    result[mask] = (series[mask] - rolling_mean[mask]) / rolling_std[mask]
 
     return result
 
@@ -339,7 +376,7 @@ async def fetch_candles_batch(
         return [dict(zip(columns, row)) for row in rows]
 
 
-def process_candles_to_derivatives(candles: list[dict]) -> pl.DataFrame:
+def process_candles_to_derivatives(candles: list[dict], verbose: bool = True) -> pl.DataFrame:
     """
     Process a batch of candles into a DataFrame with all derivatives.
 
@@ -355,6 +392,7 @@ def process_candles_to_derivatives(candles: list[dict]) -> pl.DataFrame:
         return pl.DataFrame()
 
     n = len(candles)
+    total_indicators = len(NUMERIC_INDICATORS)
 
     # Start building the result dict
     result = {
@@ -363,8 +401,8 @@ def process_candles_to_derivatives(candles: list[dict]) -> pl.DataFrame:
         "timeframe": [c["timeframe"] for c in candles],
     }
 
-    # Process each indicator
-    for indicator in NUMERIC_INDICATORS:
+    # Process each indicator with progress reporting
+    for idx, indicator in enumerate(NUMERIC_INDICATORS, 1):
         # Get raw values, converting Decimal to float
         raw_values = []
         for c in candles:
@@ -381,11 +419,17 @@ def process_candles_to_derivatives(candles: list[dict]) -> pl.DataFrame:
         # Store raw value
         result[indicator] = values.tolist()
 
+        # Progress reporting every 10 indicators or for key indicators
+        if verbose and (idx % 10 == 0 or indicator in ["close", "rsi_14", "macd_histogram"]):
+            print(f"      [{idx}/{total_indicators}] {indicator}: computing derivatives...", end="", flush=True)
+
         # Skip derivative computation if all NaN
         if np.all(np.isnan(values)):
             for deriv_name in DERIVATIVE_COEFFICIENTS.keys():
                 result[f"{indicator}_{deriv_name}"] = [np.nan] * n
                 result[f"{indicator}_{deriv_name}_zscore"] = [np.nan] * n
+            if verbose and (idx % 10 == 0 or indicator in ["close", "rsi_14", "macd_histogram"]):
+                print(" (all NaN, skipped)")
             continue
 
         # Compute derivatives
@@ -402,6 +446,10 @@ def process_candles_to_derivatives(candles: list[dict]) -> pl.DataFrame:
         div_flags = compute_divergence_flags(derivs)
         for flag_name, flag_values in div_flags.items():
             result[f"{indicator}_{flag_name}"] = flag_values.tolist()
+
+        # Close progress line
+        if verbose and (idx % 10 == 0 or indicator in ["close", "rsi_14", "macd_histogram"]):
+            print(" done")
 
     # Cross-indicator divergences (price vs momentum indicators)
     # Price velocity vs RSI velocity
@@ -506,12 +554,25 @@ async def process_symbol_timeframe(
 
     if verbose:
         print(f"    Computing derivatives for {len(all_candles):,} candles...")
+        print(f"    Processing {len(NUMERIC_INDICATORS)} indicators × 6 derivative orders × z-scores...")
+        import time
+        start_time = time.time()
 
     # Process all candles together (derivatives need sequential data)
-    df = process_candles_to_derivatives(all_candles)
+    df = process_candles_to_derivatives(all_candles, verbose=verbose)
 
     if df.is_empty():
         return
+
+    if verbose:
+        elapsed = time.time() - start_time
+        print(f"    Derivatives computed in {elapsed:.1f}s ({len(all_candles)/elapsed:.0f} candles/sec)")
+
+        # Summary of higher-order derivatives (snap, crackle, pop) - the novel ones
+        snap_cols = [c for c in df.columns if "_snap" in c and "_zscore" not in c]
+        crackle_cols = [c for c in df.columns if "_crackle" in c and "_zscore" not in c]
+        pop_cols = [c for c in df.columns if "_pop" in c and "_zscore" not in c]
+        print(f"    Higher-order derivatives: {len(snap_cols)} snap, {len(crackle_cols)} crackle, {len(pop_cols)} pop columns")
 
     # Save to parquet
     if verbose:

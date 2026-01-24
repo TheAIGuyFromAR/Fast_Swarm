@@ -270,8 +270,6 @@ class TrioBacktestEngine:
 
     def _check_exit(self, agent, indicators: dict) -> tuple[bool, float, str | None]:
         """Check if any pattern triggers an exit signal."""
-        # For now, use inverse of entry logic
-        # TODO: Add proper exit condition evaluation
         best_confidence = 0.0
         best_pattern = None
 
@@ -281,9 +279,30 @@ class TrioBacktestEngine:
                 continue
 
             exit_conditions = pattern.get("exit_conditions", {})
+            if not exit_conditions:
+                continue
 
-            # Check take profit based on position P&L
-            # This is simplified - real implementation would track position P&L
+            # Handle exit_conditions as a list (indicator-based conditions)
+            if isinstance(exit_conditions, list):
+                matched, confidence = self._evaluate_conditions(exit_conditions, indicators)
+                if matched and confidence > best_confidence:
+                    best_confidence = confidence
+                    best_pattern = pattern_id
+
+            # Handle exit_conditions as a dict (may contain indicator conditions or P&L thresholds)
+            elif isinstance(exit_conditions, dict):
+                # Check for indicator-based conditions stored in dict format
+                conditions_list = exit_conditions.get("conditions", [])
+                if conditions_list:
+                    matched, confidence = self._evaluate_conditions(conditions_list, indicators)
+                    if matched and confidence > best_confidence:
+                        best_confidence = confidence
+                        best_pattern = pattern_id
+
+        # Apply agent's min threshold for exit signals
+        min_threshold = agent.traits.get("min_threshold", 0.3)
+        if best_confidence >= min_threshold:
+            return True, best_confidence, best_pattern
 
         return False, 0.0, None
 

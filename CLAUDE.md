@@ -198,6 +198,28 @@ Tests in `Tests/Soundness/` validate economic correctness beyond functional test
 
 Run soundness tests before commits that touch metrics or backtest logic.
 
+## Diagnostic-First Debugging
+
+**When debugging complex issues, add targeted logging BEFORE attempting fixes.**
+
+Rather than guessing at root causes, add diagnostic output to reveal:
+- What values are actually present vs expected
+- What code paths are being taken
+- What data is available at each step
+
+This approach:
+- Prevents wasted effort fixing the wrong thing
+- Reveals the ACTUAL root cause, not the assumed one
+- Creates useful logging that helps with future debugging
+- Avoids introducing new bugs from speculative fixes
+
+**Example:** If patterns return 0 trades, don't guess why - add logging to show:
+1. What indicator names the pattern requests
+2. What columns are actually available in the data
+3. Whether resolution/matching succeeds or fails
+
+Once you SEE the mismatch, the fix becomes obvious.
+
 ## Core Philosophy: Signal from Noise
 
 **The entire point of Coinswarm is to find patterns from chaos.**
@@ -224,6 +246,16 @@ Comprehensive technical documentation in `docs/`:
 | `docs/API.md` | FastAPI endpoints reference |
 | `docs/CRUCIBLE.md` | Wisdom extraction, clone-and-retire |
 | `docs/DEPRECATED.md` | Legacy systems (Cloudflare, Redis) |
+
+## Output Formatting
+
+**NO UNICODE OR EMOJI** - This project is developed on Windows with cp1252 encoding. Do NOT use:
+
+- Box drawing characters (like those in polars DataFrame output)
+- Emoji in code output or print statements
+- Non-ASCII characters in any generated output
+
+Use plain ASCII for all terminal output: `=`, `-`, `|`, `+` for tables and separators.
 
 ## Legacy/Deprecated
 

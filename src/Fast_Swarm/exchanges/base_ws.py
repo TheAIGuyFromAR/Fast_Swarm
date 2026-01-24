@@ -149,6 +149,7 @@ class BaseWebSocketClient(ABC):
     PING_INTERVAL: float = 30.0
     RECONNECT_DELAY: float = 5.0
     MAX_RECONNECT_ATTEMPTS: int = 10
+    STALENESS_TIMEOUT: float = 90.0  # Force reconnect if no data for 90s
 
     def __init__(self):
         self.state = ConnectionState.DISCONNECTED
@@ -186,6 +187,26 @@ class BaseWebSocketClient(ABC):
         """Register a callback for kline/candlestick updates."""
         self._kline_callbacks.append(callback)
 
+    async def _staleness_monitor(self):
+        """Monitor for data staleness and force reconnect if no messages arrive."""
+        while self._running and self.state == ConnectionState.CONNECTED:
+            await asyncio.sleep(self.STALENESS_TIMEOUT / 3)  # Check 3x per timeout
+            if self._last_message_time > 0:
+                stale_seconds = time.time() - self._last_message_time
+                if stale_seconds > self.STALENESS_TIMEOUT:
+                    logger.warning(
+                        "WebSocket data stale for %.0fs, forcing reconnect",
+                        stale_seconds,
+                        extra=ctx(
+                            LogContext.WS_DISCONNECTED,
+                            exchange=self.EXCHANGE_NAME,
+                            reason=f"stale_{stale_seconds:.0f}s",
+                        ),
+                    )
+                    if self.ws:
+                        await self.ws.close()
+                    return
+
     async def connect(self):
         """Connect to WebSocket and start message loop."""
         self._running = True
@@ -203,6 +224,7 @@ class BaseWebSocketClient(ABC):
                     self.ws = ws
                     self.state = ConnectionState.CONNECTED
                     self._reconnect_count = 0
+                    self._last_message_time = time.time()
                     logger.info(
                         "WebSocket connected",
                         extra=ctx(LogContext.WS_CONNECTED, exchange=self.EXCHANGE_NAME, url=self.WS_URL),
@@ -211,8 +233,12 @@ class BaseWebSocketClient(ABC):
                     # Resubscribe if reconnecting
                     await self._resubscribe()
 
-                    # Start message loop
-                    await self._message_loop()
+                    # Run message loop and staleness monitor concurrently
+                    monitor_task = asyncio.create_task(self._staleness_monitor())
+                    try:
+                        await self._message_loop()
+                    finally:
+                        monitor_task.cancel()
 
             except websockets.ConnectionClosed as e:
                 logger.warning(
@@ -395,6 +421,19 @@ class BaseWebSocketClient(ABC):
             await self._subscribe_trades_impl(list(self._subscriptions["trades"]))
         if "order_book" in self._subscriptions:
             await self._subscribe_order_book_impl(list(self._subscriptions["order_book"]))
+        if "klines" in self._subscriptions and hasattr(self, "_subscribe_klines_impl"):
+            # Parse "SYMBOL:TIMEFRAME" entries back into symbols and timeframes
+            symbols = set()
+            timeframes = set()
+            for entry in self._subscriptions["klines"]:
+                parts = entry.split(":", 1)
+                if len(parts) == 2:
+                    symbols.add(parts[0])
+                    timeframes.add(parts[1])
+            if symbols and timeframes:
+                await self._subscribe_klines_impl(list(symbols), list(timeframes))
+        if "book_ticker" in self._subscriptions and hasattr(self, "_subscribe_book_ticker_impl"):
+            await self._subscribe_book_ticker_impl(list(self._subscriptions["book_ticker"]))
 
     async def _send(self, message: dict):
         """Send a JSON message."""

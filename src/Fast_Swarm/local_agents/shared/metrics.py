@@ -1,16 +1,22 @@
 """
-Trading Metrics - V3 Parity.
+Trading Metrics - V4 Engine Backed.
 
-Calculates performance metrics used in fitness scoring:
-- Sortino Ratio (downside deviation)
-- Max Drawdown
-- Calibration Score (confidence vs outcome)
-- Exit Efficiency (captured vs available profit)
-- Loss Sizing Ratio (avg loss size vs avg win size)
+Delegates core metric calculations to Fast_Swarm.Metrics.metrics_engine.
+Retains Trade dataclass and domain-specific functions (calibration, exit_efficiency)
+that aren't in the central engine.
 """
 
 import math
 from dataclasses import dataclass
+
+from Fast_Swarm.Metrics.metrics_engine import (
+    calculate_alpha as _engine_alpha,
+    calculate_expectancy as _engine_expectancy,
+    calculate_max_drawdown as _engine_max_drawdown,
+    calculate_sharpe as _engine_sharpe,
+    calculate_sortino as _engine_sortino,
+    calculate_win_rate as _engine_win_rate,
+)
 
 # =============================================================================
 # Data Classes
@@ -26,7 +32,7 @@ class Trade:
     entry_confidence: float = 0.5
     mfe_pct: float = 0.0  # Maximum Favorable Excursion
     mae_pct: float = 0.0  # Maximum Adverse Excursion
-    position_size_pct: float = 1.0
+    position_size_pct: float = 5.0
     won: bool = False
 
 
@@ -39,43 +45,27 @@ def calculate_sortino_ratio(returns: list[float], target: float = 0.0, annualiza
     """
     Calculate Sortino ratio (risk-adjusted return using downside deviation).
 
-    Sortino = (Mean Return - Target) / Downside Deviation
+    Delegates to QuantStats-backed metrics engine.
 
     Args:
         returns: List of period returns (as decimals, e.g., 0.02 for 2%).
         target: Minimum acceptable return (default 0).
-        annualization_factor: Factor for annualizing (252 for daily, 52 for weekly).
+        annualization_factor: Ignored (engine handles annualization).
 
     Returns:
-        Sortino ratio (capped at reasonable bounds).
+        Sortino ratio.
     """
     if not returns or len(returns) < 2:
         return 0.0
-
-    # Calculate mean return
-    mean_return = sum(returns) / len(returns)
-
-    # Calculate downside deviation (only negative deviations from target)
-    downside_returns = [min(0, r - target) for r in returns]
-    downside_squared = [r**2 for r in downside_returns]
-
-    if not downside_squared:
-        return 0.0
-
-    downside_variance = sum(downside_squared) / len(downside_squared)
-    downside_deviation = math.sqrt(downside_variance)
-
-    if downside_deviation < 0.0001:
-        # No downside risk - cap at reasonable max
-        return 4.0 if mean_return > target else 0.0
-
-    sortino = (mean_return - target) / downside_deviation
-
-    # Annualize
-    sortino_annualized = sortino * math.sqrt(annualization_factor)
-
-    # Cap at reasonable bounds
-    return max(-4.0, min(4.0, sortino_annualized))
+    raw = _engine_sortino(returns, target=target)
+    # Engine returns 0.0 when QuantStats returns inf/nan (all positive, no downside).
+    # Detect this: positive mean + no downside deviation = cap at 4.0.
+    if raw == 0.0:
+        mean_r = sum(returns) / len(returns)
+        downside = [r for r in returns if r < target]
+        if mean_r > 0 and not downside:
+            return 4.0
+    return max(-4.0, min(4.0, raw))
 
 
 # =============================================================================
@@ -87,7 +77,8 @@ def calculate_max_drawdown(equity_curve: list[float]) -> float:
     """
     Calculate maximum drawdown from equity curve.
 
-    Max Drawdown = max((peak - trough) / peak)
+    Direct peak-to-trough on equity values (does not roundtrip through
+    returns conversion, which distorts results for linear equity curves).
 
     Args:
         equity_curve: List of equity values over time.
@@ -100,25 +91,26 @@ def calculate_max_drawdown(equity_curve: list[float]) -> float:
 
     peak = equity_curve[0]
     max_dd = 0.0
-
-    for value in equity_curve:
-        if value > peak:
-            peak = value
-
+    for val in equity_curve[1:]:
+        if val > peak:
+            peak = val
         if peak > 0:
-            drawdown = (peak - value) / peak
-            max_dd = max(max_dd, drawdown)
-
-    # Cap at 100%
+            dd = (peak - val) / peak
+            if dd > max_dd:
+                max_dd = dd
     return min(1.0, max_dd)
 
 
-def calculate_max_drawdown_from_returns(returns: list[float]) -> float:
+def calculate_max_drawdown_from_returns(
+    returns: list[float],
+    position_sizes: list[float] | None = None,
+) -> float:
     """
-    Calculate max drawdown from returns (builds equity curve internally).
+    Calculate max drawdown from returns.
 
     Args:
         returns: List of period returns as decimals.
+        position_sizes: Optional position sizes (scales returns).
 
     Returns:
         Max drawdown as decimal.
@@ -126,12 +118,10 @@ def calculate_max_drawdown_from_returns(returns: list[float]) -> float:
     if not returns:
         return 0.0
 
-    # Build equity curve from returns
-    equity = [1.0]  # Start at 1.0
-    for r in returns:
-        equity.append(equity[-1] * (1 + r))
-
-    return calculate_max_drawdown(equity)
+    if position_sizes:
+        scaled = [r * position_sizes[i] for i, r in enumerate(returns)]
+        return _engine_max_drawdown(scaled)
+    return _engine_max_drawdown(returns)
 
 
 # =============================================================================
@@ -289,9 +279,8 @@ def calculate_win_rate(trades: list[Trade]) -> float:
     """
     if not trades:
         return 50.0  # Neutral default
-
-    wins = sum(1 for t in trades if t.pnl_pct > 0)
-    return (wins / len(trades)) * 100
+    returns = [t.pnl_pct / 100 for t in trades]
+    return _engine_win_rate(returns) * 100
 
 
 # =============================================================================
@@ -303,8 +292,6 @@ def calculate_expectancy(trades: list[Trade]) -> float:
     """
     Calculate expected value per trade.
 
-    Expectancy = (Win% * Avg Win) - (Loss% * Avg Loss)
-
     Args:
         trades: List of Trade objects.
 
@@ -313,21 +300,8 @@ def calculate_expectancy(trades: list[Trade]) -> float:
     """
     if not trades:
         return 0.0
-
-    wins = [t for t in trades if t.pnl_pct > 0]
-    losses = [t for t in trades if t.pnl_pct <= 0]
-
-    if not wins and not losses:
-        return 0.0
-
-    win_rate = len(wins) / len(trades)
-    loss_rate = len(losses) / len(trades)
-
-    avg_win = sum(t.pnl_pct for t in wins) / len(wins) if wins else 0
-    avg_loss = abs(sum(t.pnl_pct for t in losses) / len(losses)) if losses else 0
-
-    expectancy = (win_rate * avg_win) - (loss_rate * avg_loss)
-    return expectancy
+    returns = [t.pnl_pct / 100 for t in trades]
+    return _engine_expectancy(returns) * 100
 
 
 # =============================================================================
@@ -339,8 +313,6 @@ def calculate_alpha(strategy_returns: list[float], benchmark_returns: list[float
     """
     Calculate alpha (excess return over benchmark).
 
-    Alpha = Strategy Return - Benchmark Return
-
     Args:
         strategy_returns: List of strategy period returns.
         benchmark_returns: List of benchmark period returns.
@@ -348,24 +320,7 @@ def calculate_alpha(strategy_returns: list[float], benchmark_returns: list[float
     Returns:
         Alpha as percentage (-100 to 100, capped).
     """
-    if not strategy_returns or not benchmark_returns:
-        return 0.0
-
-    # Use total return
-    strategy_total = 1.0
-    for r in strategy_returns:
-        strategy_total *= 1 + r
-    strategy_return = (strategy_total - 1) * 100
-
-    benchmark_total = 1.0
-    for r in benchmark_returns:
-        benchmark_total *= 1 + r
-    benchmark_return = (benchmark_total - 1) * 100
-
-    alpha = strategy_return - benchmark_return
-
-    # Cap at reasonable bounds
-    return max(-100, min(100, alpha))
+    return _engine_alpha(strategy_returns, benchmark_returns)
 
 
 # =============================================================================
@@ -379,35 +334,17 @@ def calculate_sharpe_ratio(
     """
     Calculate Sharpe ratio.
 
-    Sharpe = (Mean Return - Risk Free Rate) / Std Dev
+    Delegates to QuantStats-backed metrics engine.
 
     Args:
         returns: List of period returns.
-        risk_free_rate: Risk-free rate per period.
-        annualization_factor: Factor for annualizing.
+        risk_free_rate: Risk-free rate per period (passed to engine).
+        annualization_factor: Ignored (engine handles annualization).
 
     Returns:
-        Sharpe ratio (capped at reasonable bounds).
+        Sharpe ratio.
     """
-    if not returns or len(returns) < 2:
-        return 0.0
-
-    mean_return = sum(returns) / len(returns)
-
-    # Calculate standard deviation
-    variance = sum((r - mean_return) ** 2 for r in returns) / len(returns)
-    std_dev = math.sqrt(variance)
-
-    if std_dev < 0.0001:
-        return 0.0
-
-    sharpe = (mean_return - risk_free_rate) / std_dev
-
-    # Annualize
-    sharpe_annualized = sharpe * math.sqrt(annualization_factor)
-
-    # Cap at reasonable bounds
-    return max(-4.0, min(4.0, sharpe_annualized))
+    return _engine_sharpe(returns, risk_free_rate=risk_free_rate)
 
 
 # =============================================================================

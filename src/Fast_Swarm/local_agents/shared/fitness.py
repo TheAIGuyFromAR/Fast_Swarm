@@ -144,41 +144,17 @@ def expectancy_multiplier(ev_pct: float) -> float:
     """
     Calculate EV multiplier from expectancy percentage.
 
-    V3 Parity: Linear interpolation between breakpoints.
+    Delegates to V4 fitness model (single source of truth).
+    HARD GATE: EV <= 0 -> 0.0.
 
     Args:
         ev_pct: Expectancy percentage (can be negative).
 
     Returns:
         Multiplier in range [0, 1.5].
-        0 if EV <= 0 (gate closed).
     """
-    # Handle special values
-    if math.isnan(ev_pct):
-        return 0.0
-    if ev_pct == float("-inf"):
-        return 0.0
-    if ev_pct == float("inf"):
-        return 1.5
-
-    # Gate closed for non-positive EV
-    if ev_pct <= 0:
-        return 0.0
-
-    # Find the right segment and interpolate
-    for i in range(len(EV_BREAKPOINTS) - 1):
-        ev_low, mult_low = EV_BREAKPOINTS[i]
-        ev_high, mult_high = EV_BREAKPOINTS[i + 1]
-
-        if ev_pct <= ev_high:
-            # Linear interpolation
-            if ev_high == ev_low:
-                return mult_high
-            ratio = (ev_pct - ev_low) / (ev_high - ev_low)
-            return mult_low + ratio * (mult_high - mult_low)
-
-    # Above all breakpoints - cap at max
-    return 1.5
+    from Fast_Swarm.Metrics.fitness_model import ev_multiplier
+    return ev_multiplier(ev_pct)
 
 
 # =============================================================================

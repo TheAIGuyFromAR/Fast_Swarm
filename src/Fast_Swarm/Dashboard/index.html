@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CoinSwarm Command Center</title>
-    <link rel="stylesheet" href="/dashboard/css/cyberpunk.css">
+    <link rel="stylesheet" href="/dashboard/css/cyberpunk.css?v=8">
 </head>
 <body>
     <div class="app-container">
@@ -44,9 +44,13 @@
                 <span class="nav-icon">&#9733;</span>
                 AGENTS
             </button>
-            <button class="nav-btn" data-page="trades">
-                <span class="nav-icon">&#8644;</span>
-                TRADES
+            <button class="nav-btn" data-page="trading">
+                <span class="nav-icon">&#9888;</span>
+                TRADING
+            </button>
+            <button class="nav-btn" data-page="taskmaster">
+                <span class="nav-icon">&#9881;</span>
+                TASKMASTER
             </button>
         </nav>
 
@@ -222,6 +226,20 @@
                         <canvas id="sol-chart" width="300" height="100"></canvas>
                     </div>
                     <div class="market-card">
+                        <div class="panel-header">BTC/ETH RATIO</div>
+                        <div class="price-display">
+                            <span class="price-value" id="btc-eth-ratio">--</span>
+                            <span class="price-change" id="btc-eth-change">--</span>
+                        </div>
+                    </div>
+                    <div class="market-card">
+                        <div class="panel-header">BTC/SOL RATIO</div>
+                        <div class="price-display">
+                            <span class="price-value" id="btc-sol-ratio">--</span>
+                            <span class="price-change" id="btc-sol-change">--</span>
+                        </div>
+                    </div>
+                    <div class="market-card">
                         <div class="panel-header">BTC DOMINANCE</div>
                         <div class="price-display">
                             <span class="price-value" id="btc-dominance-value">--.-%</span>
@@ -252,6 +270,37 @@
                         <div class="funding-legend">
                             <span class="positive">+ Longs pay shorts</span>
                             <span class="negative">- Shorts pay longs</span>
+                        </div>
+                    </div>
+                    <div class="market-card wide">
+                        <div class="panel-header">BEAR PROTECTION</div>
+                        <div class="regime-display">
+                            <div class="regime-badge" id="regime-badge">NEUTRAL</div>
+                            <div class="regime-trigger" id="regime-trigger">--</div>
+                        </div>
+                        <div class="utilization-bar-container">
+                            <div class="utilization-bar" id="utilization-bar">
+                                <div class="utilization-fill" id="utilization-fill"></div>
+                                <div class="utilization-limit" id="utilization-limit"></div>
+                            </div>
+                            <div class="utilization-labels">
+                                <span id="invested-label">0% invested</span>
+                                <span id="limit-label">65% limit</span>
+                            </div>
+                        </div>
+                        <div class="regime-stats">
+                            <div class="regime-stat">
+                                <span class="regime-stat-label">Invested</span>
+                                <span class="regime-stat-value" id="regime-invested">$0</span>
+                            </div>
+                            <div class="regime-stat">
+                                <span class="regime-stat-label">Headroom</span>
+                                <span class="regime-stat-value" id="regime-headroom">65%</span>
+                            </div>
+                            <div class="regime-stat">
+                                <span class="regime-stat-label">Tracked</span>
+                                <span class="regime-stat-value" id="regime-duration">--</span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -285,6 +334,11 @@
                         <div class="stat-value yellow" id="stat-pattern-roi">--</div>
                         <div class="stat-label">AVG ROI</div>
                     </div>
+                </div>
+                <div class="action-controls">
+                    <button class="action-btn danger" onclick="cullWeakPatterns()">CULL WEAK</button>
+                    <button class="action-btn" onclick="triggerPatternDiscovery()">DISCOVER NEW</button>
+                    <span class="action-info" id="pattern-cull-info"></span>
                 </div>
                 <div class="leaderboard-table" id="patterns-table">
                     <div class="table-loading">Loading patterns...</div>
@@ -320,6 +374,12 @@
                         <div class="stat-label">AVG SORTINO</div>
                     </div>
                 </div>
+                <div class="action-controls">
+                    <button class="action-btn success" onclick="spawnAgents()">SPAWN</button>
+                    <button class="action-btn danger" onclick="cullAgents()">CULL WEAK</button>
+                    <button class="action-btn" onclick="runEvolution()">EVOLVE</button>
+                    <span class="action-info" id="agent-cull-info"></span>
+                </div>
                 <div class="distribution-row">
                     <div class="distribution-card">
                         <div class="panel-header">ELO DISTRIBUTION</div>
@@ -335,43 +395,225 @@
                 </div>
             </section>
 
-            <!-- Page: Trades -->
-            <section class="page" id="page-trades">
+            <!-- Page: Trading (Live/Paper) -->
+            <section class="page" id="page-trading">
                 <div class="page-header">
-                    <h2>TRADE HISTORY</h2>
-                    <div class="filter-controls">
-                        <select id="filter-agent">
-                            <option value="">All Agents</option>
-                        </select>
-                        <select id="filter-asset">
-                            <option value="">All Assets</option>
-                            <option value="BTC">BTC</option>
-                            <option value="ETH">ETH</option>
-                            <option value="SOL">SOL</option>
-                        </select>
-                        <input type="number" id="filter-limit" value="100" min="10" max="500" placeholder="Limit">
+                    <h2>LIVE TRADING</h2>
+                    <span class="page-subtitle">Paper & Live Execution</span>
+                </div>
+
+                <!-- Trading Controls Panel -->
+                <div class="trading-controls-panel">
+                    <div class="panel-header">TRADING CONTROLS</div>
+                    <div class="trading-controls-grid">
+                        <!-- Agent Selection -->
+                        <div class="control-group">
+                            <label>SELECT AGENT</label>
+                            <select id="trading-agent-select" class="trading-select">
+                                <option value="">-- Select Agent --</option>
+                            </select>
+                        </div>
+
+                        <!-- Exchange Selection -->
+                        <div class="control-group">
+                            <label>EXCHANGE</label>
+                            <select id="trading-exchange-select" class="trading-select">
+                                <option value="cryptocom" selected>Crypto.com</option>
+                                <option value="binance" disabled>Binance (coming)</option>
+                                <option value="coinbase" disabled>Coinbase (coming)</option>
+                            </select>
+                        </div>
+
+                        <!-- Symbol Selection -->
+                        <div class="control-group">
+                            <label>SYMBOLS</label>
+                            <select id="trading-symbol-select" class="trading-select" multiple>
+                                <option value="BTC-USDT" selected>BTC-USDT</option>
+                                <option value="ETH-USDT">ETH-USDT</option>
+                                <option value="SOL-USDT">SOL-USDT</option>
+                            </select>
+                        </div>
+
+                        <!-- Initial Balance -->
+                        <div class="control-group">
+                            <label>PAPER BALANCE</label>
+                            <input type="number" id="trading-balance-input" class="trading-input" value="10000" min="100" max="1000000">
+                        </div>
+                    </div>
+
+                    <!-- Action Buttons Row 1: Paper Trading -->
+                    <div class="trading-buttons-row">
+                        <span class="button-group-label">PAPER:</span>
+                        <button class="action-btn success" id="btn-start-paper" onclick="startPaperTrading()">START PAPER</button>
+                        <button class="action-btn warning" id="btn-stop-paper" onclick="stopPaperTrading()">STOP PAPER</button>
+                        <button class="action-btn" id="btn-pause-trading" onclick="pauseTrading()">PAUSE</button>
+                        <button class="action-btn" id="btn-resume-trading" onclick="resumeTrading()">RESUME</button>
+                    </div>
+
+                    <!-- Action Buttons Row 2: Live Trading -->
+                    <div class="trading-buttons-row">
+                        <span class="button-group-label">LIVE:</span>
+                        <button class="action-btn success" id="btn-start-live" onclick="startLiveTrading()" disabled title="Not implemented yet">START LIVE</button>
+                        <button class="action-btn danger" id="btn-stop-live" onclick="stopLiveTrading()" disabled title="Not implemented yet">STOP LIVE</button>
+                        <button class="action-btn danger" id="btn-close-all" onclick="closeAllPositions()">CLOSE ALL</button>
                     </div>
                 </div>
-                <div class="stats-bar" id="trade-stats">
-                    <div class="stat-card">
-                        <div class="stat-value" id="stat-trade-total">--</div>
-                        <div class="stat-label">TOTAL TRADES</div>
+
+                <!-- Bear Protection -->
+                <div class="market-card wide trading-bear-protection">
+                    <div class="panel-header">BEAR PROTECTION</div>
+                    <div class="regime-display">
+                        <div class="regime-badge" id="trading-regime-badge">NEUTRAL</div>
+                        <div class="regime-trigger" id="trading-regime-trigger">--</div>
                     </div>
-                    <div class="stat-card">
-                        <div class="stat-value green" id="stat-trade-pnl">--</div>
-                        <div class="stat-label">TOTAL P&L</div>
+                    <div class="utilization-bar-container">
+                        <div class="utilization-bar" id="trading-utilization-bar">
+                            <div class="utilization-fill" id="trading-utilization-fill"></div>
+                            <div class="utilization-limit" id="trading-utilization-limit"></div>
+                        </div>
+                        <div class="utilization-labels">
+                            <span id="trading-invested-label">0% invested</span>
+                            <span id="trading-limit-label">65% limit</span>
+                        </div>
                     </div>
-                    <div class="stat-card">
-                        <div class="stat-value cyan" id="stat-trade-winrate">--</div>
-                        <div class="stat-label">WIN RATE</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-value yellow" id="stat-trade-avg">--</div>
-                        <div class="stat-label">AVG TRADE</div>
+                    <div class="regime-stats">
+                        <div class="regime-stat">
+                            <span class="regime-stat-label">Invested</span>
+                            <span class="regime-stat-value" id="trading-regime-invested">$0</span>
+                        </div>
+                        <div class="regime-stat">
+                            <span class="regime-stat-label">Headroom</span>
+                            <span class="regime-stat-value" id="trading-regime-headroom">65%</span>
+                        </div>
+                        <div class="regime-stat">
+                            <span class="regime-stat-label">Tracked</span>
+                            <span class="regime-stat-value" id="trading-regime-duration">--</span>
+                        </div>
                     </div>
                 </div>
-                <div class="leaderboard-table" id="trades-table">
+
+                <!-- Trading Stats -->
+                <div class="stats-row">
+                    <div class="stat-card">
+                        <div class="stat-label">PAPER AGENTS</div>
+                        <div class="stat-value" id="trading-active-agents">--</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">OPEN POSITIONS</div>
+                        <div class="stat-value" id="trading-open-positions">--</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">TODAY P&L</div>
+                        <div class="stat-value green" id="trading-today-pnl">--</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">PENDING APPROVALS</div>
+                        <div class="stat-value yellow" id="trading-pending">--</div>
+                    </div>
+                </div>
+
+                <!-- Active Paper Trading Agents -->
+                <div class="section-header"><h3>ACTIVE PAPER TRADING AGENTS</h3></div>
+                <div class="active-agents-grid" id="active-paper-agents">
+                    <div class="no-data">No active paper trading sessions</div>
+                </div>
+
+                <!-- Decision Feed -->
+                <div class="section-header">
+                    <h3>DECISION FEED</h3>
+                    <label class="feed-control">
+                        <input type="checkbox" id="feed-auto-scroll" checked> Auto-scroll
+                    </label>
+                </div>
+                <div class="decision-feed-container">
+                    <div class="decision-feed" id="decision-feed">
+                        <div class="no-data">Waiting for decisions...</div>
+                    </div>
+                </div>
+
+                <!-- Balance Pot -->
+                <div class="stats-row" id="balance-pot-row">
+                    <div class="stat-card">
+                        <div class="stat-label">EXCHANGE POT</div>
+                        <div class="stat-value" id="exchange-pot-total">$0</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">IN USE</div>
+                        <div class="stat-value yellow" id="exchange-pot-used">$0</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">AVAILABLE</div>
+                        <div class="stat-value green" id="exchange-pot-free">$0</div>
+                    </div>
+                </div>
+
+                <!-- Recent Trades -->
+                <div class="section-header"><h3>RECENT TRADES</h3></div>
+                <div class="leaderboard-table" id="live-trades-table">
                     <div class="table-loading">Loading trades...</div>
+                </div>
+            </section>
+
+            <!-- Page: Taskmaster (System Health & Interventions) -->
+            <section class="page" id="page-taskmaster">
+                <div class="page-header">
+                    <h2>TASKMASTER</h2>
+                    <span class="page-subtitle">System Health & Interventions</span>
+                </div>
+
+                <!-- Health Status Row -->
+                <div class="stats-row" id="taskmaster-health-row">
+                    <div class="stat-card">
+                        <div class="stat-label">SYSTEM STATUS</div>
+                        <div class="stat-value" id="tm-system-status">--</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">COMPONENTS</div>
+                        <div class="stat-value" id="tm-component-count">--</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">UPTIME</div>
+                        <div class="stat-value" id="tm-uptime">--</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">CHECKS</div>
+                        <div class="stat-value" id="tm-checks">--</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">POKES SENT</div>
+                        <div class="stat-value" id="tm-pokes">--</div>
+                    </div>
+                </div>
+
+                <!-- Components Grid -->
+                <div class="section-header"><h3>MONITORED COMPONENTS</h3></div>
+                <div class="components-grid" id="tm-components-grid">
+                    <!-- Populated by JS -->
+                </div>
+
+                <!-- Intervention Buttons -->
+                <div class="section-header"><h3>INTERVENTIONS</h3></div>
+                <div class="intervention-row">
+                    <button class="action-btn" id="btn-poke-orchestrator" onclick="pokeOrchestrator()">POKE ORCHESTRATOR</button>
+                    <button class="action-btn" id="btn-clear-errors" onclick="clearErrors()">CLEAR ERRORS</button>
+                    <button class="action-btn warning" id="btn-skip-phase" onclick="skipPhase()">SKIP PHASE</button>
+                    <button class="action-btn danger" id="btn-restart-orchestrator" onclick="restartOrchestrator()">RESTART</button>
+                </div>
+                <div class="intervention-row">
+                    <button class="action-btn success" id="btn-force-evolution" onclick="forceEvolution()">FORCE EVOLUTION</button>
+                    <button class="action-btn success" id="btn-force-crucible" onclick="forceCrucible()">FORCE CRUCIBLE</button>
+                </div>
+
+                <!-- Activity Log -->
+                <div class="section-header"><h3>ACTIVITY LOG</h3></div>
+                <div class="activity-log" id="tm-activity-log">
+                    <!-- Populated by JS -->
+                </div>
+
+                <!-- Alerts -->
+                <div class="section-header"><h3>ALERTS</h3></div>
+                <div class="alerts-list" id="tm-alerts">
+                    <div class="no-alerts">No active alerts</div>
                 </div>
             </section>
         </main>
@@ -383,6 +625,6 @@
         </footer>
     </div>
 
-    <script src="/dashboard/js/app.js?v=4"></script>
+    <script src="/dashboard/js/app.js?v=11"></script>
 </body>
 </html>

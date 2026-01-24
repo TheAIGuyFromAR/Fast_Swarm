@@ -530,6 +530,8 @@ async def bulk_update_fitness(
     """
     Update fitness scores for multiple agents.
 
+    Uses batch query to avoid N+1 database calls.
+
     Args:
         session: Database session
         updates: List of {"agent_id": str, "fitness_score": float}
@@ -537,16 +539,27 @@ async def bulk_update_fitness(
     Returns:
         Number of agents updated
     """
-    updated_count = 0
-    for update in updates:
-        agent_id = update.get("agent_id")
-        fitness = update.get("fitness_score")
+    # Build mapping of agent_id -> fitness_score
+    valid_updates = {
+        u["agent_id"]: max(0.0, min(100.0, u["fitness_score"]))
+        for u in updates
+        if u.get("agent_id") and u.get("fitness_score") is not None
+    }
 
-        if agent_id and fitness is not None:
-            agent = await get_agent_by_id(session, agent_id)
-            if agent:
-                agent.fitness_score = max(0.0, min(100.0, fitness))
-                updated_count += 1
+    if not valid_updates:
+        return 0
+
+    # Batch fetch all agents in one query
+    stmt = select(Agent).where(Agent.id.in_(valid_updates.keys()))
+    result = await session.exec(stmt)
+    agents = result.all()
+
+    # Update fitness scores
+    updated_count = 0
+    for agent in agents:
+        if agent.id in valid_updates:
+            agent.fitness_score = valid_updates[agent.id]
+            updated_count += 1
 
     await session.flush()
     return updated_count
@@ -598,6 +611,8 @@ async def bulk_delete_agents(
     """
     Soft-delete multiple agents.
 
+    Uses batch query to avoid N+1 database calls.
+
     Args:
         session: Database session
         agent_ids: List of agent IDs to delete
@@ -605,9 +620,20 @@ async def bulk_delete_agents(
     Returns:
         Number of agents deleted
     """
-    deleted_count = 0
-    for agent_id in agent_ids:
-        if await delete_agent(session, agent_id, hard_delete=False):
-            deleted_count += 1
+    if not agent_ids:
+        return 0
 
-    return deleted_count
+    # Batch fetch all agents in one query
+    stmt = select(Agent).where(Agent.id.in_(agent_ids))
+    result = await session.exec(stmt)
+    agents = result.all()
+
+    # Soft-delete all found agents
+    now = datetime.utcnow()
+    for agent in agents:
+        agent.status = "dead"
+        agent.is_active = False
+        agent.updated_at = now
+
+    await session.flush()
+    return len(agents)

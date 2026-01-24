@@ -136,13 +136,14 @@ class PatternDiscoveryService:
                         "windows_tested": len(all_results),
                     }
 
-                    # Update priority
+                    # Update priority and stats
                     await update_priority_after_backtest(
                         session,
                         pid,
                         new_runs=(pattern.get("total_runs") or 0) + len(all_results),
                         new_periods_tested=(pattern.get("periods_tested") or 0) + len(all_results),
                         new_fitness=avg_fitness,
+                        new_total_trades=total_trades,
                     )
                     tested += 1
                     print(f"fitness={avg_fitness:.1f}, trades={total_trades}, windows={len(all_results)} ({pattern_elapsed:.1f}s)")
@@ -262,7 +263,7 @@ class PatternDiscoveryService:
             window_summary = f"{w.get('asset', '?')}/{w.get('timeframe', '?')}"
             if len(windows) > 1:
                 window_summary += f" (+{len(windows)-1} more)"
-            print(f"[PatternTest] {pid[:8]}: testing on {window_summary}...")
+            print(f"[PatternTest] {pid[:20]}: testing on {window_summary}...")
 
         # Convert pattern model to dict format for backtest_pattern_on_windows
         pattern_dict = {
@@ -286,7 +287,7 @@ class PatternDiscoveryService:
                 )
                 all_results.extend(window_results)
             except Exception as e:
-                print(f"[PatternTest] Window error for {pid[:8]}: {e}")
+                print(f"[PatternTest] Window error for {pid[:20]}: {e}")
 
         pattern_elapsed = time.time() - pattern_start
 
@@ -312,9 +313,20 @@ class PatternDiscoveryService:
                 window_info = f"{asset}/{tf} ({regime})"
 
             # Update pattern stats
+            # CRITICAL: If 0 total trades, fitness should be 0 (pattern doesn't work)
+            # This prevents inflated fitness scores from 0-trade windows
+            if total_trades == 0:
+                avg_fitness = 0.0
+
             pattern.fitness_score = avg_fitness
             pattern.total_runs = (pattern.total_runs or 0) + len(all_results)
             pattern.periods_tested = (pattern.periods_tested or 0) + len(all_results)
+            # FIX: Also update total_trades (was missing, causing 0-trade patterns to show high fitness)
+            pattern.total_trades = (pattern.total_trades or 0) + total_trades
+
+            # Update status from 'untested' to 'tested' if this was first backtest
+            if pattern.status == "untested":
+                pattern.status = "tested"
 
             from datetime import datetime
             pattern.last_backtest_at = datetime.utcnow()
@@ -322,10 +334,12 @@ class PatternDiscoveryService:
             session.add(pattern)
 
             # Enhanced logging with key fitness components
+            # Include window count to show coverage
+            windows_tested = len(all_results)
             print(
-                f"[PatternTest] {pid[:8]}: "
-                f"fitness={avg_fitness:.1f}, trades={total_trades}, "
-                f"α={avg_alpha:+.1f}%, sortino={avg_sortino:.2f}, "
+                f"[PatternTest] {pid[:20]}: "
+                f"fitness={avg_fitness:.1f}, trades={total_trades}, windows={windows_tested}, "
+                f"a={avg_alpha:+.1f}%, sortino={avg_sortino:.2f}, "
                 f"DD={avg_drawdown:.1f}%, WR={avg_win_rate:.0f}%, "
                 f"PnL={total_pnl:+.1f}% | {window_info} ({pattern_elapsed:.1f}s)"
             )
@@ -337,14 +351,16 @@ class PatternDiscoveryService:
                 "windows_tested": len(all_results),
             }
         else:
-            # No windows produced results - could be: no entry signals, asset mismatch, or too few candles
+            # All windows threw exceptions - this is now rare since 0-trade windows produce results
             window_info = ""
             candle_info = ""
+            windows_attempted = len(windows) if windows else 0
             if windows:
                 w = windows[0]
                 asset = w.get('asset', '?')
                 tf = w.get('timeframe', '?')
-                window_info = f" | {asset}/{tf}"
+                regime = w.get('regime', '?')
+                window_info = f" | {asset}/{tf} ({regime})"
 
                 # Check candle count if preloaded_candles available
                 if preloaded_candles:
@@ -358,7 +374,7 @@ class PatternDiscoveryService:
                     else:
                         candle_info = f" (no {cache_key} in cache)"
 
-            print(f"[PatternTest] {pid[:8]}: 0 trades, 0 windows{window_info}{candle_info} ({pattern_elapsed:.1f}s)")
+            print(f"[PatternTest] {pid[:20]}: 0 trades, {windows_attempted} windows attempted{window_info}{candle_info} ({pattern_elapsed:.1f}s)")
             return {
                 "pattern_id": pid,
                 "total_trades": 0,

@@ -14,7 +14,16 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 import pandas as pd
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, func, select, text
+
+# Try to import async database components (may not be available in all contexts)
+try:
+    from Fast_Swarm.Database import async_session_maker
+    from Fast_Swarm.Infrastructure.Models.market_data_models import EnhancedCandle
+except ImportError:
+    # Fallback: these will be None if imports fail
+    async_session_maker = None  # type: ignore[assignment]
+    EnhancedCandle = None  # type: ignore[assignment,misc]
 
 
 # Build sync database URL

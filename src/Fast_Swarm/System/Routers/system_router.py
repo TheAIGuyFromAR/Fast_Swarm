@@ -426,6 +426,79 @@ async def stop_orchestrator():
     return {"message": "Orchestrator stopped", "status": orchestrator.get_status()}
 
 
+# =============================================================================
+# Backtest Speed Mode
+# =============================================================================
+
+
+@router.get("/backtest/speed", tags=["Control"])
+async def get_backtest_speed_mode():
+    """
+    Get the current backtest speed mode.
+
+    Speed modes control which timeframes are used for backtesting:
+    - NORMAL: All timeframes (1m, 5m, 15m, 1h, 4h, 1d) - slowest but most thorough
+    - TURBO: 15m and slower - skip 1m/5m which take hours to enrich
+    - HYPERSPEED: 1h and slower - fastest iteration for quick testing
+
+    Returns:
+    - mode: Current speed mode
+    - allowed_timeframes: List of timeframes being used
+    - effective_pool_size: Number of windows available at this speed
+    """
+    from ...local_agents.backtest.windows import get_allowed_timeframes, get_backtest_speed, get_pool_stats
+
+    stats = get_pool_stats()
+    return {
+        "mode": get_backtest_speed(),
+        "allowed_timeframes": get_allowed_timeframes(),
+        "effective_pool_size": stats.get("effective_pool_size", 0),
+        "total_pool_size": stats.get("pool_size", 0),
+        "effective_by_timeframe": stats.get("effective_windows_by_timeframe", {}),
+    }
+
+
+@router.post("/backtest/speed/{mode}", tags=["Control"])
+async def set_backtest_speed_mode(mode: str):
+    """
+    Set the backtest speed mode.
+
+    Args:
+        mode: "NORMAL", "TURBO", or "HYPERSPEED"
+
+    Speed modes:
+    - NORMAL: All timeframes - full coverage but 1m data takes hours to enrich
+    - TURBO: 15m+ timeframes - good balance of coverage and speed (default)
+    - HYPERSPEED: 1h+ timeframes - fastest, use for quick iteration
+
+    Note: This takes effect immediately for new window selections.
+    Existing windows in the orchestrator queue are not affected until the next batch.
+    """
+    from ...local_agents.backtest.windows import (
+        SPEED_TIMEFRAMES,
+        get_allowed_timeframes,
+        get_pool_stats,
+        set_backtest_speed,
+    )
+
+    mode = mode.upper()
+    if mode not in SPEED_TIMEFRAMES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid mode: {mode}. Must be one of: {list(SPEED_TIMEFRAMES.keys())}"
+        )
+
+    set_backtest_speed(mode)
+    stats = get_pool_stats()
+
+    return {
+        "message": f"Backtest speed set to {mode}",
+        "mode": mode,
+        "allowed_timeframes": get_allowed_timeframes(),
+        "effective_pool_size": stats.get("effective_pool_size", 0),
+    }
+
+
 @router.get("/events", tags=["Monitoring"])
 async def event_stream():
     """

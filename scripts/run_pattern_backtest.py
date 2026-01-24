@@ -22,6 +22,8 @@ import logging
 import statistics
 
 import pandas as pd
+from sqlmodel import select
+
 from Fast_Swarm.Database import async_session_maker
 from Fast_Swarm.Infrastructure.Models.market_data_models import EnhancedCandle
 from Fast_Swarm.local_agents.backtest.engine import AIZoneMode, LocalBacktestEngine
@@ -29,7 +31,6 @@ from Fast_Swarm.local_agents.core.state import AgentRecord
 from Fast_Swarm.local_agents.core.traits import AgentTraits
 from Fast_Swarm.local_agents.run_evolution import EnhancedOHLCVLoader
 from Fast_Swarm.Patterns.Models.pattern_models import Pattern
-from sqlmodel import select
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger("PATTERN_BACKTEST")

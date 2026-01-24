@@ -15,6 +15,7 @@ Pipeline:
 5. Parse and insert discovered patterns
 """
 
+import asyncio
 import json
 import os
 import subprocess
@@ -434,7 +435,9 @@ class PatternDiscoveryScheduler:
         losers: list[dict],
         top_features: list[FeatureImportance],
     ) -> str:
-        """Build the LLM prompt for pattern discovery."""
+        """Build the LLM prompt for pattern discovery with valid indicator list."""
+        from Fast_Swarm.local_agents.backtest.pattern_matcher import get_valid_indicator_names
+
         avg_winner_pnl = sum(w["pnl_pct"] for w in winners) / len(winners) if winners else 0
         avg_loser_pnl = sum(l["pnl_pct"] for l in losers) / len(losers) if losers else 0
         win_rate = len(winners) / (len(winners) + len(losers)) * 100 if (winners or losers) else 0
@@ -446,6 +449,14 @@ class PatternDiscoveryScheduler:
                 f"- {f.name}: importance={f.importance:.4f}, "
                 f"winners={f.winner_mean:.4f}, losers={f.loser_mean:.4f} ({direction})"
             )
+
+        # Get the canonical list of valid indicators
+        valid_indicators = get_valid_indicator_names()
+        # Filter to only column-style indicators (not computed like "goldenCross")
+        # Show a curated subset that's most useful for patterns
+        column_indicators = [i for i in valid_indicators if "_" in i or i in (
+            "close", "open", "high", "low", "volume", "regime"
+        )]
 
         prompt = f"""## Pattern Discovery Task
 
@@ -459,13 +470,17 @@ Analyze chaos trades to discover profitable trading patterns.
 ### Top Discriminating Features
 {chr(10).join(feature_analysis)}
 
+### VALID INDICATORS (use ONLY these names in conditions)
+{', '.join(column_indicators)}
+
 ### Task
-Create 3-5 actionable trading patterns using these features.
+Create 3-5 actionable trading patterns using the top features above.
+IMPORTANT: Only use indicator names from the VALID INDICATORS list above.
 
 For each pattern provide:
 1. A descriptive name
-2. Entry conditions (indicator + operator + value)
-3. Exit conditions (trailing stop or indicator-based)
+2. Entry conditions using "indicator" + "min"/"max" bounds (NOT operator/value)
+3. Exit conditions (trailing_stop with atr_multiplier, or indicator-based)
 4. Brief description
 
 Output ONLY valid JSON:
@@ -474,7 +489,8 @@ Output ONLY valid JSON:
     {{
       "name": "Pattern Name",
       "entry_conditions": [
-        {{"indicator": "rsi", "operator": "<", "value": 30}}
+        {{"indicator": "rsi_14", "max": 30}},
+        {{"indicator": "macd_histogram", "min": 0}}
       ],
       "exit_conditions": [
         {{"type": "trailing_stop", "atr_multiplier": 2.0}}
@@ -489,17 +505,17 @@ Output ONLY valid JSON:
     async def _call_llm(self, prompt: str) -> str | None:
         """Call the LLM provider."""
         if self.llm_provider == "claude":
-            return self._call_claude_cli(prompt)
+            return await self._call_claude_cli(prompt)
         else:
-            return self._call_ollama(prompt)
+            return await self._call_ollama(prompt)
 
-    def _call_ollama(self, prompt: str) -> str | None:
-        """Call Ollama API."""
+    async def _call_ollama(self, prompt: str) -> str | None:
+        """Call Ollama API (runs in thread pool to avoid blocking event loop)."""
         if not HAS_REQUESTS:
             print("[PatternDiscovery] requests not installed")
             return None
 
-        try:
+        def _sync_call():
             response = requests.post(
                 f"{OLLAMA_URL}/api/generate",
                 json={
@@ -519,13 +535,17 @@ Output ONLY valid JSON:
             print(f"[PatternDiscovery] Ollama response: {len(result)} chars")
             return result
 
+        try:
+            # Run blocking HTTP call in thread pool
+            return await asyncio.to_thread(_sync_call)
+
         except Exception as e:
             print(f"[PatternDiscovery] Ollama error: {e}")
             return None
 
-    def _call_claude_cli(self, prompt: str) -> str | None:
-        """Call Claude via CLI."""
-        try:
+    async def _call_claude_cli(self, prompt: str) -> str | None:
+        """Call Claude via CLI (runs in thread pool to avoid blocking event loop)."""
+        def _sync_call():
             with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as f:
                 f.write(prompt)
                 prompt_file = f.name
@@ -556,6 +576,10 @@ Output ONLY valid JSON:
             finally:
                 Path(prompt_file).unlink(missing_ok=True)
 
+        try:
+            # Run blocking subprocess call in thread pool
+            return await asyncio.to_thread(_sync_call)
+
         except FileNotFoundError:
             print("[PatternDiscovery] Claude CLI not found")
             return None
@@ -564,7 +588,13 @@ Output ONLY valid JSON:
             return None
 
     def _parse_patterns(self, llm_response: str) -> list[dict]:
-        """Parse patterns from LLM response."""
+        """
+        Parse patterns from LLM response, normalize indicator names, and validate.
+
+        Pipeline: JSON parse -> normalize indicators -> validate structure -> return
+        """
+        from Fast_Swarm.local_agents.backtest.pattern_matcher import normalize_pattern_conditions
+
         patterns = []
 
         try:
@@ -583,24 +613,57 @@ Output ONLY valid JSON:
         except json.JSONDecodeError as e:
             print(f"[PatternDiscovery] JSON parse error: {e}")
 
-        # Validate
-        valid = []
+        # Normalize indicator names BEFORE validation
+        normalized_patterns = []
         for p in patterns:
+            if not isinstance(p, dict):
+                continue
+
+            # Normalize entry conditions
+            entry_conds = p.get("entry_conditions", [])
+            if entry_conds:
+                fixed_entry, removed_entry = normalize_pattern_conditions(entry_conds)
+                p["entry_conditions"] = fixed_entry
+                if removed_entry:
+                    print(f"[PatternDiscovery] Auto-removed unresolvable entry indicators: {removed_entry}")
+
+            # Normalize exit conditions (if they have indicator-based exits)
+            exit_conds = p.get("exit_conditions", [])
+            if exit_conds:
+                fixed_exit, removed_exit = normalize_pattern_conditions(exit_conds)
+                p["exit_conditions"] = fixed_exit
+                if removed_exit:
+                    print(f"[PatternDiscovery] Auto-removed unresolvable exit indicators: {removed_exit}")
+
+            normalized_patterns.append(p)
+
+        # Validate structure (after normalization may have removed some conditions)
+        valid = []
+        for p in normalized_patterns:
             if self._validate_pattern(p):
                 valid.append(p)
+            else:
+                name = p.get("name", "unknown")
+                print(f"[PatternDiscovery] Pattern '{name}' invalid after normalization (no valid conditions left)")
 
         return valid
 
     def _validate_pattern(self, pattern: dict) -> bool:
-        """Validate a pattern has required fields."""
+        """
+        Validate a pattern has required fields and at least one valid entry condition.
+
+        Called AFTER normalization, so unresolvable indicators have been stripped.
+        If all entry conditions were stripped, the pattern is invalid.
+        """
         if not isinstance(pattern, dict):
             return False
         if "name" not in pattern:
             return False
         if "entry_conditions" not in pattern or not pattern["entry_conditions"]:
             return False
-        if "exit_conditions" not in pattern or not pattern["exit_conditions"]:
-            return False
+        # Exit conditions are optional - trailing_stop/atr types don't need indicators
+        if "exit_conditions" not in pattern:
+            pattern["exit_conditions"] = []
         return True
 
     async def _insert_patterns(
@@ -608,7 +671,12 @@ Output ONLY valid JSON:
         session: AsyncSession,
         patterns: list[dict],
     ) -> int:
-        """Insert discovered patterns to PostgreSQL."""
+        """
+        Insert discovered patterns to PostgreSQL.
+
+        Patterns are already normalized (indicator names resolved to canonical forms)
+        by the time they reach this method.
+        """
         if not patterns:
             return 0
 
@@ -622,11 +690,11 @@ Output ONLY valid JSON:
                     INSERT INTO patterns (
                         pattern_id, name, origin, is_active,
                         entry_conditions, exit_conditions,
-                        created_at
+                        created_at, status, tier, fitness_score
                     ) VALUES (
                         :pid, :name, :origin, TRUE,
                         :entry, :exit,
-                        NOW()
+                        NOW(), 'untested', 3, 50.0
                     )
                     ON CONFLICT (pattern_id) DO NOTHING
                 """),
@@ -640,7 +708,7 @@ Output ONLY valid JSON:
                 )
 
                 inserted += 1
-                print(f"[PatternDiscovery] Inserted: {p.get('name')}")
+                print(f"[PatternDiscovery] Inserted: {p.get('name')} ({pattern_id})")
 
             except Exception as e:
                 print(f"[PatternDiscovery] Insert failed: {e}")
