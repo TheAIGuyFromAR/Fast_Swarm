@@ -386,4 +386,78 @@ See `docs/DEPRECATED.md` for historical reference:
 
 ---
 
-*Last Updated: 2026-01-13*
+## Lessons from Conductor (LLM Orchestration Spike)
+
+A local LLM orchestration prototype (`conductor/`) was spiked using llama.cpp + Qwen3-Coder-Next. The design revealed patterns that map directly to Fast_Swarm gaps. These are the actionable takeaways.
+
+### 1. Slot-Managed LLM Access
+
+**Problem:** When agents hit `AI_REFLECT` zones during batch backtests, they all contend for one LLM endpoint with no queuing or priority. This creates an unmetered bottleneck.
+
+**Solution:** Add a `SlotManager` to `llm_service.py` — a semaphore-based queue (3-5 concurrent slots) that assigns priority by agent tier (Tier 1 gets slots first) and tracks wait times as a metric. Prevents LLM saturation during batch backtests.
+
+**Conductor reference:** `start-inference.sh` uses `-np 5` (5 parallel slots) with dedicated slot assignment per task type.
+
+### 2. Prefix Cache Reuse
+
+**Problem:** Every agent LLM call starts cold. But most share nearly identical system prompts (market context, role description, pattern conditions) — hundreds of redundant prompt-processing cycles.
+
+**Solution:** Structure LLM prompts as shared prefix (system role + market regime) + variable suffix (agent traits + position). With Ollama's `keep_alive` this partially happens already. With vLLM or llama.cpp, explicit prefix caching gives 2-4x throughput on batch backtests.
+
+**Conductor reference:** `--cache-reuse 256` reuses the first 256 tokens of common prefixes; `--slot-save-path ./kv-cache` persists KV state to disk.
+
+### 3. Multi-Candidate Pattern Discovery (Ultra Think)
+
+**Problem:** Pattern discovery asks the LLM once for one pattern, accepts it, and hopes it's good. No quality competition at the discovery stage.
+
+**Solution:** During `pattern_discovery_loop`, generate 5 candidate patterns per cycle (parallel LLM calls or a single "give me 5 patterns" prompt). Quick-score each with a sanity backtest (1 asset, 5 windows). Keep only the top 1-2. Front-loads quality filtering before patterns enter the 10-minute backtest queue.
+
+**Conductor reference:** Ultra Think generates N candidate responses, scores each independently, picks the best. Quality emerges from quantity + selection — the same principle that drives evolution itself.
+
+### 4. Training Data Collection from Normal Operations
+
+**Problem:** The Crucible captures agent snapshots and wisdom extraction is template-based. Neither formats data for model improvement. Every backtest generates LLM interaction data that's currently thrown away.
+
+**Solution:** Log every LLM call during backtests as a training pair: `(market_context + agent_prompt) → (decision) → (outcome P&L)`. Store in a `training_pairs` table. Over time, this becomes a fine-tuning dataset — profitable decisions are positive examples, unprofitable ones are negative. The system teaches itself.
+
+**Conductor reference:** `orchestrator/training/` directory designed to capture every input/output pair during normal use, building fine-tuning data automatically.
+
+### 5. Validation Before Trust (LLM Preflight)
+
+**Problem:** The evolution loop starts and assumes the LLM is available. If Ollama is down, agents silently fall back to heuristic mode without logging the degradation.
+
+**Solution:** Add `llm_preflight()` to `Main.py` lifespan startup — ping the LLM, measure latency, log the actual AI mode. If unavailable, log it loudly rather than silently degrading. The robustness service should also periodically validate LLM health.
+
+**Conductor reference:** `validate-engine.sh` runs a hello-world completion, checks `/health`, and measures baseline tok/s before any real work starts.
+
+### 6. Review Gate for Pattern Quality
+
+**Problem:** Discovered patterns enter the backtest queue immediately with no sanity check. Patterns with obvious issues (contradictory conditions, degenerate thresholds) waste 10-minute backtest cycles before being filtered out.
+
+**Solution:** Add a lightweight review step after discovery: before a pattern enters the queue, check for basic sanity (buy != exit conditions, indicators not contradictory, thresholds within normal ranges). Either rule-based or a quick LLM pass. Reject obvious junk before it consumes backtest resources.
+
+**Conductor reference:** Plan → Code → Review — the reviewer can reject work and trigger a redo, preventing garbage from propagating downstream.
+
+### 7. Resource-Aware Loop Scheduling
+
+**Problem:** Background loops run on fixed timers regardless of system load. Pattern backtest every 10 minutes + evolution cycle + discovery can all peak simultaneously.
+
+**Solution:** Check `_active_evolution_run` before starting pattern backtests — if evolution is mid-cycle, reduce batch size or skip. Coordinate loops so they don't compete for compute at the same time.
+
+**Conductor reference:** Q8_0 cache quantization, MoE offloading, tuned batch sizes — every parameter chosen to maximize throughput within hardware limits. Resource awareness is a first-class concern, not an afterthought.
+
+### Priority Implementation Order
+
+| Priority | Lesson | Impact | Effort |
+|----------|--------|--------|--------|
+| 1 | Slot-managed LLM access | High — unblocks batch backtests | Low |
+| 2 | Multi-candidate pattern discovery | High — better pattern quality | Medium |
+| 3 | Training pair collection | High — compounding improvement | Medium |
+| 4 | LLM preflight validation | Medium — visibility | Low |
+| 5 | Resource-aware scheduling | Medium — stability | Low |
+| 6 | Prefix cache reuse | Medium — throughput | Medium |
+| 7 | Pattern review gate | Medium — less waste | Low |
+
+---
+
+*Last Updated: 2026-02-18*
